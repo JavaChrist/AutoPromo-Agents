@@ -56,6 +56,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     res.status(500).json({ error: 'Binaire ffmpeg introuvable côté serveur.' });
     return;
   }
+  // @vercel/blob authenticates via OIDC (VERCEL_OIDC_TOKEN + BLOB_STORE_ID) by
+  // default on Vercel, or via a static BLOB_READ_WRITE_TOKEN. Accept either.
+  const hasBlobAuth =
+    !!process.env.BLOB_READ_WRITE_TOKEN ||
+    (!!process.env.BLOB_STORE_ID && !!process.env.VERCEL_OIDC_TOKEN);
+  if (!hasBlobAuth) {
+    res.status(503).json({
+      error:
+        "Stockage Vercel Blob non configuré. Connecte un store Blob au projet (Vercel → Storage), puis redéploie.",
+    });
+    return;
+  }
 
   let work: string | null = null;
   try {
