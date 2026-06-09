@@ -17,7 +17,7 @@ import {
 } from '@blinkdotnew/mobile-ui';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCreateCampaign, useGenerateContent } from '@/lib/hooks';
-import { blink, DEMO_USER_ID } from '@/lib/blink';
+import { blink, DEMO_USER_ID, describeGenerationError } from '@/lib/blink';
 import type { Campaign } from '@/lib/types';
 
 const TONES = [
@@ -72,7 +72,7 @@ export default function NewCampaign() {
             toast('Campagne prête !', { message: 'Tous les contenus ont été générés.', variant: 'success' });
           },
           onError: (err: any) => {
-            toast('Erreur de génération', { message: err?.message || 'Réessaye plus tard.', variant: 'error' });
+            toast('Erreur de génération', { message: describeGenerationError(err), variant: 'error' });
           },
         });
       } else {

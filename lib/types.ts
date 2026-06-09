@@ -85,6 +85,9 @@ export const VIDEO_PRESETS = [
   { value: 24, label: '24s • 3 scènes', scenes: 3, sceneDuration: '8s' },
   { value: 32, label: '32s • 4 scènes (recommandé)', scenes: 4, sceneDuration: '8s' },
   { value: 48, label: '48s • 6 scènes (cinématique)', scenes: 6, sceneDuration: '8s' },
+  { value: 64, label: '64s • 8 scènes', scenes: 8, sceneDuration: '8s' },
+  { value: 80, label: '80s • 10 scènes', scenes: 10, sceneDuration: '8s' },
+  { value: 120, label: '120s • 15 scènes (max)', scenes: 15, sceneDuration: '8s' },
 ];
 
 // ─── Campaign waves (multi-post planning) ─────────────────────────────────────
@@ -145,10 +148,39 @@ export const ASPECT_RATIOS = [
   { value: '1:1', label: '⬛ Carré (Feed Instagram)' },
 ];
 
-// Veo/Sora/Kling support 8s reliably across all models — keep it simple
+// Generic fallback list (kept for backward compat). Prefer MODEL_DURATIONS,
+// which only exposes the durations each model actually supports.
 export const DURATIONS = [
   { value: '8s', label: '8 secondes (standard)' },
 ];
+
+/**
+ * Durations supported per single-clip model. A single AI clip is inherently
+ * short (~4–12s depending on the model) — for 30–60s+ use the Long format tab,
+ * which stitches multiple scenes. Values match the model providers' supported
+ * durations; the agent keeps a 422 → Kling fallback as a safety net.
+ */
+export const MODEL_DURATIONS: Record<VideoModel, { value: string; label: string }[]> = {
+  'fal-ai/veo3.1/fast': [
+    { value: '4s', label: '4 secondes' },
+    { value: '6s', label: '6 secondes' },
+    { value: '8s', label: '8 secondes (standard)' },
+  ],
+  'fal-ai/veo3.1': [
+    { value: '4s', label: '4 secondes' },
+    { value: '6s', label: '6 secondes' },
+    { value: '8s', label: '8 secondes (standard)' },
+  ],
+  'fal-ai/sora-2/text-to-video/pro': [
+    { value: '4s', label: '4 secondes' },
+    { value: '8s', label: '8 secondes' },
+    { value: '12s', label: '12 secondes (max)' },
+  ],
+  'fal-ai/kling-video/v2.6/pro/text-to-video': [
+    { value: '5s', label: '5 secondes' },
+    { value: '10s', label: '10 secondes' },
+  ],
+};
 
 export const PLATFORM_META: Record<Platform, { label: string; color: string; emoji: string; charLimit?: number }> = {
   instagram: { label: 'Instagram', color: '#E1306C', emoji: '📷', charLimit: 2200 },

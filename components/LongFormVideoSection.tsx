@@ -38,6 +38,8 @@ import {
   type VideoProject,
   type VideoScene,
 } from '@/lib/types';
+import { describeGenerationError } from '@/lib/blink';
+import { mergeScenes } from '@/lib/mergeVideo';
 
 interface Props {
   campaign: Campaign;
@@ -192,12 +194,36 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
   const anyGenerating = scenes.some((s: VideoScene) => s.status === 'generating') || generateAllMut.isPending;
   const failedScenes = scenes.filter((s: VideoScene) => s.status === 'failed');
 
+  const [merging, setMerging] = useState(false);
+  const [mergedUrl, setMergedUrl] = useState<string | null>(null);
+
+  async function handleMerge() {
+    const urls = [...readyScenes]
+      .sort((a: VideoScene, b: VideoScene) => a.scene_index - b.scene_index)
+      .map((s: VideoScene) => s.video_url as string)
+      .filter(Boolean);
+    if (urls.length < 2) {
+      toast('Pas assez de scènes', { message: 'Il faut au moins 2 scènes prêtes.', variant: 'error' });
+      return;
+    }
+    setMerging(true);
+    try {
+      const { url } = await mergeScenes(urls, project.title);
+      setMergedUrl(url);
+      toast('Vidéo assemblée !', { message: 'Ton montage complet est prêt.', variant: 'success' });
+    } catch (err: any) {
+      toast('Fusion impossible', { message: err?.message || 'Réessaye plus tard.', variant: 'error' });
+    } finally {
+      setMerging(false);
+    }
+  }
+
   async function handleGenerateAll() {
     try {
       await generateAllMut.mutateAsync({ project, scenes });
       toast('Vidéo prête !', { message: 'Toutes les scènes sont générées.', variant: 'success' });
     } catch (err: any) {
-      toast('Partiellement échoué', { message: err?.message || 'Certaines scènes ont échoué.', variant: 'error' });
+      toast('Partiellement échoué', { message: describeGenerationError(err), variant: 'error' });
     }
   }
 
@@ -213,7 +239,7 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
         duration: scene.duration,
       });
     } catch (err: any) {
-      toast('Erreur', { message: err?.message || 'Échec', variant: 'error' });
+      toast('Erreur', { message: describeGenerationError(err), variant: 'error' });
     }
   }
 
@@ -275,6 +301,51 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
             currentIndex={playingSceneIdx}
             onSceneChange={setPlayingSceneIdx}
           />
+        )}
+
+        {/* Assemblage automatique en un seul MP4 (serveur) */}
+        {allReady && readyScenes.length > 1 && (
+          <YStack
+            backgroundColor="$color2"
+            borderRadius="$3"
+            padding="$3"
+            gap="$2"
+            borderWidth={1}
+            borderColor="$accent6"
+          >
+            <Button
+              size="$4"
+              backgroundColor={merging ? '$color3' : '#7C5CFF'}
+              color={merging ? '$color12' : 'white'}
+              fontWeight="700"
+              icon={merging ? <Spinner size="small" color="$color12" /> : <Sparkles size={16} color="white" />}
+              disabled={merging}
+              onPress={handleMerge}
+              pressStyle={{ scale: 0.97 }}
+            >
+              {merging ? 'Assemblage en cours…' : `Assembler les ${readyScenes.length} scènes en 1 vidéo`}
+            </Button>
+
+            {mergedUrl && (
+              <YStack gap="$2">
+                <SizableText size="$2" color="$color12" fontWeight="700">
+                  ✅ Vidéo complète
+                </SizableText>
+                <VideoClipPlayer url={mergedUrl} aspectRatio={project.aspect_ratio} />
+                <Button
+                  size="$3"
+                  icon={<Download size={14} />}
+                  onPress={() => mergedUrl && Linking.openURL(mergedUrl)}
+                >
+                  Télécharger la vidéo complète
+                </Button>
+              </YStack>
+            )}
+
+            <SizableText size="$1" color="$color10">
+              ⚙️ Fusion réalisée côté serveur (disponible sur la version déployée).
+            </SizableText>
+          </YStack>
         )}
 
         {/* Liste des scènes */}

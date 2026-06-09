@@ -58,6 +58,17 @@ export function useGenerateVideoClip() {
         });
         return row.id as string;
       } catch (err: any) {
+        // Surface the full raw error in dev to diagnose gateway/HTML responses.
+        if (__DEV__) {
+          console.error('[generateVideoClip] RAW ERROR →', err);
+          console.error('[generateVideoClip] details →', {
+            message: err?.message,
+            status: err?.status ?? err?.details?.status ?? err?.response?.status,
+            url: err?.url ?? err?.details?.url ?? err?.response?.url,
+            details: err?.details,
+            body: err?.details?.body ?? err?.response?.data,
+          });
+        }
         const msg = getErrorMessage(err);
         throw new Error(msg);
       }

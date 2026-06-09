@@ -1,9 +1,11 @@
+import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DEMO_USER_ID, getErrorMessage } from '../blink';
 import { db } from '../db';
 import { normalizeCampaign } from '../normalizers';
 import type { Campaign, Platform } from '../types';
 import { generateFullCampaign } from '../agents';
+import { useGenerationStore } from '../stores/generation';
 
 // ─── Campaigns ──────────────────────────────────────────────────────────────
 
@@ -57,12 +59,15 @@ export function useGenerateContent() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (campaign: Campaign) => {
+      useGenerationStore.getState().start(campaign.id);
       await db.campaigns.update(campaign.id, { status: 'generating' });
       qc.invalidateQueries({ queryKey: ['campaigns'] });
       qc.invalidateQueries({ queryKey: ['campaign', campaign.id] });
 
       try {
-        const { script, posts } = await generateFullCampaign(campaign);
+        const { script, posts } = await generateFullCampaign(campaign, (key, state) => {
+          useGenerationStore.getState().setStep(key, state);
+        });
 
         // Replace existing scripts
         const existingScripts = await db.videoScripts.list({ where: { campaignId: campaign.id } });
@@ -103,12 +108,50 @@ export function useGenerateContent() {
       }
     },
     onSettled: (_, __, campaign) => {
+      useGenerationStore.getState().finish();
       qc.invalidateQueries({ queryKey: ['campaigns'] });
       qc.invalidateQueries({ queryKey: ['campaign', campaign.id] });
       qc.invalidateQueries({ queryKey: ['video_script', campaign.id] });
       qc.invalidateQueries({ queryKey: ['social_posts', campaign.id] });
     },
   });
+}
+
+// ─── Stuck generation self-heal ───────────────────────────────────────────────
+
+/**
+ * Clears a phantom `status: 'generating'` left over from a crashed/reloaded run.
+ *
+ * Safe by design: a generation started in this browser session always sets the
+ * generation store first, so if the store is tracking this campaign we never
+ * reset. Only a status with no active run (i.e. left over from a previous
+ * session) is healed, after a short grace delay to absorb any mount-time race.
+ */
+export function useStuckGenerationGuard(campaign: Campaign | null | undefined): void {
+  const qc = useQueryClient();
+  const trackedId = useGenerationStore((s) => s.campaignId);
+  const status = campaign?.status;
+  const id = campaign?.id;
+
+  useEffect(() => {
+    if (!id || status !== 'generating') return;
+    if (trackedId === id) return; // a real run is in progress — don't touch it
+
+    const timer = setTimeout(async () => {
+      if (useGenerationStore.getState().campaignId === id) return; // a run started meanwhile
+      try {
+        const scripts = await db.videoScripts.list({ where: { campaignId: id } });
+        const next = scripts.length > 0 ? 'ready' : 'draft';
+        await db.campaigns.update(id, { status: next });
+        qc.invalidateQueries({ queryKey: ['campaign', id] });
+        qc.invalidateQueries({ queryKey: ['campaigns'] });
+      } catch {
+        // best-effort: ignore failures, the user can retry/regenerate
+      }
+    }, 12000);
+
+    return () => clearTimeout(timer);
+  }, [id, status, trackedId, qc]);
 }
 
 // ─── Delete Campaign ──────────────────────────────────────────────────────────

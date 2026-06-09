@@ -25,6 +25,8 @@ import {
   Film,
   MessageSquare,
   RefreshCw,
+  Check,
+  AlertCircle,
 } from '@blinkdotnew/mobile-ui';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -33,8 +35,11 @@ import {
   useSocialPosts,
   useGenerateContent,
   useDeleteCampaign,
+  useStuckGenerationGuard,
 } from '@/lib/hooks';
 import { PLATFORM_META, type Platform, type SocialPost } from '@/lib/types';
+import { describeGenerationError } from '@/lib/blink';
+import { useGenerationStore, type AgentStepKey, type AgentStepState } from '@/lib/stores/generation';
 import { AIClipsSection } from '@/components/AIClipsSection';
 import { LongFormVideoSection } from '@/components/LongFormVideoSection';
 import { CampaignPlanSection } from '@/components/CampaignPlanSection';
@@ -51,6 +56,9 @@ export default function CampaignDetail() {
   const generateMut = useGenerateContent();
   const deleteMut = useDeleteCampaign();
 
+  // Self-heal a phantom 'generating' status left over from a crashed/reloaded run.
+  useStuckGenerationGuard(campaign);
+
   const isGenerating = campaign?.status === 'generating' || generateMut.isPending;
 
   async function handleGenerate() {
@@ -59,8 +67,7 @@ export default function CampaignDetail() {
       await generateMut.mutateAsync(campaign);
       toast('Contenu généré !', { message: 'Scripts et posts prêts.', variant: 'success' });
     } catch (err: any) {
-      const msg = err?.message || String(err) || 'Impossible de générer.';
-      toast('Erreur de génération', { message: msg, variant: 'error' });
+      toast('Erreur de génération', { message: describeGenerationError(err), variant: 'error' });
     }
   }
 
@@ -184,23 +191,7 @@ export default function CampaignDetail() {
                 : 'Lancer les agents IA'}
             </Button>
 
-            {isGenerating ? (
-              <YStack
-                backgroundColor="$color2"
-                borderRadius="$4"
-                padding="$3"
-                gap="$2"
-                borderWidth={1}
-                borderColor="$color4"
-              >
-                <AgentStatus label="🎬 Agent scénariste" />
-                <AgentStatus label="🗣️ Agent voix off" />
-                <AgentStatus label="📷 Agent Instagram" />
-                <AgentStatus label="𝕏 Agent X" />
-                <AgentStatus label="👍 Agent Facebook" />
-                <AgentStatus label="💼 Agent LinkedIn" />
-              </YStack>
-            ) : null}
+            {isGenerating ? <AgentProgressList campaignId={campaign.id} /> : null}
           </YStack>
 
           {hasContent ? (
@@ -250,11 +241,69 @@ export default function CampaignDetail() {
   );
 }
 
-function AgentStatus({ label }: { label: string }) {
+const AGENT_ITEMS: { key: AgentStepKey; label: string }[] = [
+  { key: 'script', label: '🎬 Agent scénariste' },
+  { key: 'script', label: '🗣️ Agent voix off' },
+  { key: 'instagram', label: '📷 Agent Instagram' },
+  { key: 'x', label: '𝕏 Agent X' },
+  { key: 'facebook', label: '👍 Agent Facebook' },
+  { key: 'linkedin', label: '💼 Agent LinkedIn' },
+];
+
+function AgentProgressList({ campaignId }: { campaignId: string }) {
+  const trackedId = useGenerationStore((s) => s.campaignId);
+  const steps = useGenerationStore((s) => s.steps);
+
+  // When the store tracks THIS campaign we show real per-agent state. Otherwise
+  // (page reloaded, or a run started elsewhere) we fall back to "running" since
+  // the persisted status === 'generating' is what brought us here.
+  const tracking = trackedId === campaignId;
+  const stateFor = (key: AgentStepKey): AgentStepState => (tracking ? steps[key] : 'running');
+
+  const done = AGENT_ITEMS.filter((it) => stateFor(it.key) === 'done').length;
+
+  return (
+    <YStack
+      backgroundColor="$color2"
+      borderRadius="$4"
+      padding="$3"
+      gap="$2"
+      borderWidth={1}
+      borderColor="$color4"
+    >
+      <XStack justifyContent="space-between" alignItems="center" paddingBottom="$1">
+        <SizableText size="$2" color="$color12" fontWeight="700">
+          Les agents travaillent…
+        </SizableText>
+        <SizableText size="$2" color="$color10">
+          {done}/{AGENT_ITEMS.length}
+        </SizableText>
+      </XStack>
+      {AGENT_ITEMS.map((it, i) => (
+        <AgentStatus key={i} label={it.label} state={stateFor(it.key)} />
+      ))}
+    </YStack>
+  );
+}
+
+function AgentStatus({ label, state }: { label: string; state: AgentStepState }) {
   return (
     <XStack alignItems="center" gap="$2">
-      <Spinner size="small" color="$accent10" />
-      <SizableText size="$2" color="$color11">{label}</SizableText>
+      {state === 'done' ? (
+        <Check size={16} color="#22C55E" />
+      ) : state === 'failed' ? (
+        <AlertCircle size={16} color="#EF4444" />
+      ) : state === 'running' ? (
+        <Spinner size="small" color="$accent10" />
+      ) : (
+        <SizableText size="$3" color="$color8">◦</SizableText>
+      )}
+      <SizableText
+        size="$2"
+        color={state === 'done' ? '$color12' : state === 'failed' ? '$red10' : '$color11'}
+      >
+        {label}
+      </SizableText>
     </XStack>
   );
 }

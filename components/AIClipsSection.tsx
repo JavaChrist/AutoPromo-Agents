@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Linking } from 'react-native';
 import {
   YStack,
@@ -10,6 +10,7 @@ import {
   Button,
   Badge,
   Spinner,
+  Progress,
   BlinkSelect,
   Label,
   toast,
@@ -17,10 +18,12 @@ import {
   Trash2,
   Download,
   Wand2,
+  Check,
 } from '@blinkdotnew/mobile-ui';
 import { VideoClipPlayer } from './VideoClipPlayer';
 import { useVideoClips, useGenerateVideoClip, useDeleteVideoClip } from '@/lib/hooks';
-import { VIDEO_MODELS, ASPECT_RATIOS, DURATIONS, type Campaign, type VideoScript, type VideoClip } from '@/lib/types';
+import { describeGenerationError, isAuthError } from '@/lib/blink';
+import { VIDEO_MODELS, ASPECT_RATIOS, MODEL_DURATIONS, type VideoModel, type Campaign, type VideoScript, type VideoClip } from '@/lib/types';
 
 interface Props {
   campaign: Campaign;
@@ -36,6 +39,15 @@ export function AIClipsSection({ campaign, script }: Props) {
   const [aspectRatio, setAspectRatio] = useState<string>('9:16');
   const [duration, setDuration] = useState<string>('8s');
 
+  const durationOptions = MODEL_DURATIONS[model as VideoModel] ?? MODEL_DURATIONS['fal-ai/veo3.1/fast'];
+
+  // Each model supports different durations — keep the selection valid on switch.
+  useEffect(() => {
+    if (!durationOptions.some((d) => d.value === duration)) {
+      setDuration(durationOptions[0].value);
+    }
+  }, [model]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const isGenerating = generateMut.isPending;
 
   async function handleGenerate() {
@@ -43,12 +55,10 @@ export function AIClipsSection({ campaign, script }: Props) {
       await generateMut.mutateAsync({ campaign, script, model, aspectRatio, duration });
       toast('Clip vidéo prêt !', { message: 'Ton clip IA a été généré avec succès.', variant: 'success' });
     } catch (err: any) {
-      const msg = err?.message || '';
-      const isAuth = msg.includes('401') || msg.includes('Unauthorized') || msg.includes('BlinkAuthError');
-      if (isAuth) {
+      if (isAuthError(err)) {
         toast('Connexion requise', { message: 'Connecte-toi pour utiliser les agents IA.', variant: 'error' });
       } else {
-        toast('Erreur de génération', { message: msg || 'Réessaye dans quelques instants.', variant: 'error' });
+        toast('Erreur de génération', { message: describeGenerationError(err), variant: 'error' });
       }
     }
   }
@@ -106,7 +116,7 @@ export function AIClipsSection({ campaign, script }: Props) {
             <YStack gap="$2">
               <Label color="$color12" fontWeight="600">Durée</Label>
               <BlinkSelect
-                items={DURATIONS}
+                items={durationOptions}
                 value={duration}
                 onValueChange={setDuration}
                 placeholder="Durée"
@@ -114,22 +124,8 @@ export function AIClipsSection({ campaign, script }: Props) {
             </YStack>
           </YStack>
 
-          {/* Étapes de l'agent pendant la génération */}
-          {isGenerating && (
-            <YStack
-              backgroundColor="$color3"
-              borderRadius="$4"
-              padding="$3"
-              gap="$2"
-              borderWidth={1}
-              borderColor="$color5"
-            >
-              <AgentStep active label="🎨 Analyse du storyboard en cours…" />
-              <AgentStep label="🖊️ Rédaction du prompt cinématique (EN)" />
-              <AgentStep label="🎬 Envoi au moteur vidéo IA (30-60s)…" />
-              <AgentStep label="💾 Sauvegarde du clip" />
-            </YStack>
-          )}
+          {/* Progression de l'agent pendant la génération */}
+          {isGenerating && <GenerationProgress estimatedMs={60000} />}
 
           <Button
             size="$5"
@@ -148,6 +144,24 @@ export function AIClipsSection({ campaign, script }: Props) {
           <SizableText size="$1" color="$color10" textAlign="center">
             💡 Le clip s'inspire du storyboard de ton script. ~2.5 crédits/clip.
           </SizableText>
+
+          <YStack
+            backgroundColor="$color3"
+            borderRadius="$3"
+            padding="$3"
+            borderWidth={1}
+            borderColor="$color5"
+            gap="$1"
+          >
+            <SizableText size="$2" color="$color12" fontWeight="700">
+              ⏱️ Besoin d'une vidéo de 30 à 120s ?
+            </SizableText>
+            <SizableText size="$1" color="$color10">
+              Un clip IA fait au maximum ~8‑12s (limite des modèles Veo/Sora/Kling).
+              Pour une vidéo plus longue, utilise l'onglet « 🎦 Long format » : il
+              assemble plusieurs scènes (jusqu'à 120s).
+            </SizableText>
+          </YStack>
         </YStack>
       </Card>
 
@@ -170,11 +184,82 @@ export function AIClipsSection({ campaign, script }: Props) {
   );
 }
 
-function AgentStep({ label, active }: { label: string; active?: boolean }) {
+/**
+ * Time-based progress UI for the (blocking) video generation call.
+ * The API doesn't stream a real percentage, so we ease toward ~95% over an
+ * estimated duration and let the success/error path replace this block.
+ */
+function GenerationProgress({ estimatedMs = 60000 }: { estimatedMs?: number }) {
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef(Date.now());
+
+  useEffect(() => {
+    startRef.current = Date.now();
+    const id = setInterval(() => setElapsed(Date.now() - startRef.current), 250);
+    return () => clearInterval(id);
+  }, []);
+
+  // Asymptotic ramp: fast at first, never quite reaching 100% until it's done.
+  const ratio = 1 - Math.exp((-3 * elapsed) / estimatedMs);
+  const progress = Math.min(95, Math.round(ratio * 95));
+  const seconds = Math.floor(elapsed / 1000);
+
+  const steps = [
+    { label: '🎨 Analyse du storyboard', done: progress > 12 },
+    { label: '🖊️ Rédaction du prompt cinématique (EN)', done: progress > 28 },
+    { label: '🎬 Génération vidéo par le moteur IA…', done: progress > 88 },
+    { label: '💾 Sauvegarde du clip', done: false },
+  ];
+  const activeIndex = steps.findIndex((s) => !s.done);
+
+  return (
+    <YStack
+      backgroundColor="$color3"
+      borderRadius="$4"
+      padding="$3"
+      gap="$3"
+      borderWidth={1}
+      borderColor="$color5"
+    >
+      <XStack justifyContent="space-between" alignItems="center">
+        <SizableText size="$2" color="$color12" fontWeight="700">
+          Génération en cours…
+        </SizableText>
+        <SizableText size="$2" color="$color10">
+          {progress}% • {seconds}s
+        </SizableText>
+      </XStack>
+
+      <Progress value={progress} size="$2" backgroundColor="$color5">
+        <Progress.Indicator animation="bouncy" backgroundColor="#7C5CFF" />
+      </Progress>
+
+      <YStack gap="$1.5">
+        {steps.map((step, i) => (
+          <AgentStep key={i} label={step.label} active={i === activeIndex} done={step.done} />
+        ))}
+      </YStack>
+
+      <SizableText size="$1" color="$color10">
+        ⏳ La génération vidéo peut prendre 30 à 60s. Garde cet onglet ouvert.
+      </SizableText>
+    </YStack>
+  );
+}
+
+function AgentStep({ label, active, done }: { label: string; active?: boolean; done?: boolean }) {
   return (
     <XStack alignItems="center" gap="$2">
-      {active ? <Spinner size="small" color="$accent10" /> : <SizableText size="$3">◦</SizableText>}
-      <SizableText size="$2" color={active ? '$color12' : '$color10'}>{label}</SizableText>
+      {done ? (
+        <Check size={14} color="#22C55E" />
+      ) : active ? (
+        <Spinner size="small" color="$accent10" />
+      ) : (
+        <SizableText size="$3" color="$color8">◦</SizableText>
+      )}
+      <SizableText size="$2" color={done || active ? '$color12' : '$color10'}>
+        {label}
+      </SizableText>
     </XStack>
   );
 }

@@ -99,6 +99,12 @@ Contenu prêt à publier (pas de markdown, pas d'instructions). Les hashtags : s
 
 // ─── Clip vidéo IA ────────────────────────────────────────────────────────────
 
+/** Kling only accepts 5s or 10s — map any requested duration to the nearest. */
+function toKlingDuration(d: string): '5s' | '10s' {
+  const seconds = parseInt(d, 10);
+  return Number.isFinite(seconds) && seconds >= 8 ? '10s' : '5s';
+}
+
 export async function generateVideoFromScript(
   campaign: Campaign,
   script: { hook?: string; storyboard?: string; voiceover?: string } | null,
@@ -142,28 +148,26 @@ Write ONE paragraph of 60-100 words in English, dense and visual, optimized for 
     visualPrompt = `Modern cinematic promotional video for "${campaign.product_name}": ${campaign.pitch}. Dynamic tracking shots, vibrant professional lighting, contemporary UI mockups on screens, energetic transitions. Target audience: ${campaign.target_audience || 'general public'}. Clean, polished tech advertisement style.`;
   }
 
-  // Force 8s — only universally-supported duration
-  const safeDuration: '8s' = '8s';
-
-  const tryModel = async (model: string) => {
+  const tryModel = async (model: string, duration: string) => {
     const { result } = await blink.ai.generateVideo({
       prompt: visualPrompt,
       model,
       aspect_ratio: options.aspect_ratio as '9:16' | '16:9' | '1:1',
-      duration: safeDuration,
+      duration: duration as any,
     });
     return result.video.url;
   };
 
   let videoUrl: string;
   try {
-    videoUrl = await tryModel(options.model);
+    videoUrl = await tryModel(options.model, options.duration);
   } catch (err: any) {
     const msg = String(err?.message || '').toLowerCase();
     const isUnprocessable =
       msg.includes('422') || msg.includes('unprocessable') || msg.includes('invalid') || msg.includes('content policy');
     if (isUnprocessable && options.model !== 'fal-ai/kling-video/v2.6/pro/text-to-video') {
-      videoUrl = await tryModel('fal-ai/kling-video/v2.6/pro/text-to-video');
+      // Kling only supports 5s/10s — clamp the requested duration to a valid value.
+      videoUrl = await tryModel('fal-ai/kling-video/v2.6/pro/text-to-video', toKlingDuration(options.duration));
     } else {
       throw err;
     }
@@ -402,17 +406,40 @@ Le post doit refléter l'angle de la vague (pas un post de lancement générique
 // ─── Full campaign ────────────────────────────────────────────────────────────
 
 export async function generateFullCampaign(
-  campaign: Campaign
+  campaign: Campaign,
+  onStep?: (key: 'script' | Platform, state: 'done' | 'failed') => void
 ): Promise<{ script: ScriptResult; posts: Record<Platform, PostResult> }> {
   // Auth once before parallel calls
   await ensureAuthForAI();
 
   const platforms: Platform[] = ['instagram', 'x', 'facebook', 'linkedin'];
 
-  const [script, ...postResults] = await Promise.all([
-    generateVideoScript(campaign),
-    ...platforms.map((p) => generateSocialPost(campaign, p)),
-  ]);
+  // Each task reports its real completion so the UI can reflect per-agent state.
+  const scriptPromise = generateVideoScript(campaign).then(
+    (r) => {
+      onStep?.('script', 'done');
+      return r;
+    },
+    (e) => {
+      onStep?.('script', 'failed');
+      throw e;
+    }
+  );
+
+  const postPromises = platforms.map((p) =>
+    generateSocialPost(campaign, p).then(
+      (r) => {
+        onStep?.(p, 'done');
+        return r;
+      },
+      (e) => {
+        onStep?.(p, 'failed');
+        throw e;
+      }
+    )
+  );
+
+  const [script, ...postResults] = await Promise.all([scriptPromise, ...postPromises]);
 
   const posts = platforms.reduce((acc, p, i) => {
     acc[p] = postResults[i];
