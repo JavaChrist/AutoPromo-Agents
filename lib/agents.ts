@@ -105,14 +105,54 @@ function toKlingDuration(d: string): '5s' | '10s' {
   return Number.isFinite(seconds) && seconds >= 8 ? '10s' : '5s';
 }
 
+/** Image-to-video variant of each text-to-video model (used when a screenshot is provided). */
+const I2V_VARIANTS: Record<string, string> = {
+  'fal-ai/veo3.1/fast': 'fal-ai/veo3.1/fast/image-to-video',
+  'fal-ai/veo3.1': 'fal-ai/veo3.1/image-to-video',
+  'fal-ai/sora-2/text-to-video/pro': 'fal-ai/sora-2/image-to-video/pro',
+  'fal-ai/kling-video/v2.6/pro/text-to-video': 'fal-ai/kling-video/v2.6/pro/image-to-video',
+};
+
+const KLING_T2V = 'fal-ai/kling-video/v2.6/pro/text-to-video';
+const KLING_I2V = 'fal-ai/kling-video/v2.6/pro/image-to-video';
+
+// ─── Per-scene screenshots (long-form) ───────────────────────────────────────
+// The screenshot URL is persisted inside the scene's prompt text (first line,
+// behind a marker) so no DB schema change is required and it survives reloads
+// and regenerations.
+
+const SCENE_IMG_MARKER = '[screenshot]';
+
+/** Attach (or detach with null) a screenshot URL to a scene prompt. */
+export function setSceneScreenshot(prompt: string, imageUrl: string | null): string {
+  const { prompt: clean } = extractSceneScreenshot(prompt);
+  return imageUrl ? `${SCENE_IMG_MARKER} ${imageUrl}\n${clean}` : clean;
+}
+
+/** Split a scene prompt into the clean prompt + the attached screenshot URL, if any. */
+export function extractSceneScreenshot(prompt: string): { prompt: string; imageUrl?: string } {
+  const text = prompt || '';
+  if (!text.startsWith(SCENE_IMG_MARKER)) return { prompt: text };
+  const newlineIdx = text.indexOf('\n');
+  const firstLine = newlineIdx === -1 ? text : text.slice(0, newlineIdx);
+  const imageUrl = firstLine.slice(SCENE_IMG_MARKER.length).trim();
+  const rest = newlineIdx === -1 ? '' : text.slice(newlineIdx + 1).trim();
+  return { prompt: rest, imageUrl: imageUrl || undefined };
+}
+
 export async function generateVideoFromScript(
   campaign: Campaign,
   script: { hook?: string; storyboard?: string; voiceover?: string } | null,
-  options: { model: string; aspect_ratio: string; duration: string }
+  options: { model: string; aspect_ratio: string; duration: string; image_url?: string }
 ): Promise<{ video_url: string; prompt: string }> {
   await ensureAuthForAI();
   const toneInstruction = TONE_INSTRUCTIONS[campaign.tone || 'professionnel'] || '';
+  const fromScreenshot = !!options.image_url;
   let visualPrompt = '';
+
+  const screenshotInstruction = fromScreenshot
+    ? `\nIMPORTANT: The video STARTS from a real screenshot of the app's interface (provided as the first frame). Describe how to bring this UI to life: subtle camera push-in or pan over the interface, UI elements animating (taps, scrolls, transitions), then optionally widening to show the app in a real-life context. Do NOT invent a different interface — the existing screenshot IS the app.`
+    : '';
 
   if (script?.storyboard) {
     const { object } = await blink.ai.generateObject({
@@ -123,6 +163,7 @@ export async function generateVideoFromScript(
 - Lighting and mood
 - Camera movements
 - Dominant colors and composition
+${screenshotInstruction}
 
 Product: ${campaign.product_name}
 Pitch: ${campaign.pitch}
@@ -145,7 +186,9 @@ Write ONE paragraph of 60-100 words in English, dense and visual, optimized for 
     });
     visualPrompt = (object as { prompt: string }).prompt;
   } else {
-    visualPrompt = `Modern cinematic promotional video for "${campaign.product_name}": ${campaign.pitch}. Dynamic tracking shots, vibrant professional lighting, contemporary UI mockups on screens, energetic transitions. Target audience: ${campaign.target_audience || 'general public'}. Clean, polished tech advertisement style.`;
+    visualPrompt = fromScreenshot
+      ? `Cinematic promotional video starting from the provided real screenshot of the "${campaign.product_name}" app interface. Gentle camera push-in over the UI, interface elements subtly animating (smooth scrolls, taps, micro-interactions), modern professional lighting, then a tasteful zoom-out revealing the app on a smartphone in a real-life scene. ${campaign.pitch}. Clean, polished tech advertisement style.`
+      : `Modern cinematic promotional video for "${campaign.product_name}": ${campaign.pitch}. Dynamic tracking shots, vibrant professional lighting, contemporary UI mockups on screens, energetic transitions. Target audience: ${campaign.target_audience || 'general public'}. Clean, polished tech advertisement style.`;
   }
 
   const tryModel = async (model: string, duration: string) => {
@@ -154,20 +197,25 @@ Write ONE paragraph of 60-100 words in English, dense and visual, optimized for 
       model,
       aspect_ratio: options.aspect_ratio as '9:16' | '16:9' | '1:1',
       duration: duration as any,
+      ...(options.image_url ? { image_url: options.image_url } : {}),
     });
     return result.video.url;
   };
 
+  // With a screenshot, switch to the image-to-video variant of the chosen model.
+  const primaryModel = fromScreenshot ? (I2V_VARIANTS[options.model] ?? options.model) : options.model;
+  const fallbackModel = fromScreenshot ? KLING_I2V : KLING_T2V;
+
   let videoUrl: string;
   try {
-    videoUrl = await tryModel(options.model, options.duration);
+    videoUrl = await tryModel(primaryModel, options.duration);
   } catch (err: any) {
     const msg = String(err?.message || '').toLowerCase();
     const isUnprocessable =
-      msg.includes('422') || msg.includes('unprocessable') || msg.includes('invalid') || msg.includes('content policy');
-    if (isUnprocessable && options.model !== 'fal-ai/kling-video/v2.6/pro/text-to-video') {
+      msg.includes('400') || msg.includes('422') || msg.includes('unprocessable') || msg.includes('invalid') || msg.includes('content policy');
+    if (isUnprocessable && primaryModel !== fallbackModel) {
       // Kling only supports 5s/10s — clamp the requested duration to a valid value.
-      videoUrl = await tryModel('fal-ai/kling-video/v2.6/pro/text-to-video', toKlingDuration(options.duration));
+      videoUrl = await tryModel(fallbackModel, toKlingDuration(options.duration));
     } else {
       throw err;
     }
@@ -244,37 +292,45 @@ Each prompt must be self-contained (the AI generates each clip independently wit
 }
 
 export async function generateSceneClip(
-  prompt: string,
+  rawPrompt: string,
   options: { model: string; aspect_ratio: string; duration: string }
 ): Promise<string> {
   await ensureAuthForAI();
 
-  // Force duration to 8s — only universally-supported duration across Veo/Sora/Kling
-  const safeDuration = '8s';
+  // A screenshot may be embedded in the prompt → switch to image-to-video.
+  const { prompt: basePrompt, imageUrl } = extractSceneScreenshot(rawPrompt);
+  const prompt = imageUrl
+    ? `The video STARTS from the provided real screenshot of the app's interface (first frame). Bring this exact UI to life — do NOT invent a different interface. ${basePrompt}`
+    : basePrompt;
 
-  const tryModel = async (model: string) => {
+  const primaryModel = imageUrl ? (I2V_VARIANTS[options.model] ?? options.model) : options.model;
+  const fallbackModel = imageUrl ? KLING_I2V : KLING_T2V;
+
+  const tryModel = async (model: string, duration: string) => {
     const { result } = await blink.ai.generateVideo({
       prompt,
       model,
       aspect_ratio: options.aspect_ratio as '9:16' | '16:9' | '1:1',
-      duration: safeDuration as '8s',
+      duration: duration as any,
+      ...(imageUrl ? { image_url: imageUrl } : {}),
     });
     return result.video.url;
   };
 
   try {
-    return await tryModel(options.model);
+    return await tryModel(primaryModel, options.duration);
   } catch (err: any) {
     const msg = String(err?.message || '').toLowerCase();
-    // On 422/unprocessable, fallback to Kling (most permissive)
+    // On 400/422/unprocessable, fallback to Kling (most permissive on aspect ratios).
     const isUnprocessable =
+      msg.includes('400') ||
       msg.includes('422') ||
       msg.includes('unprocessable') ||
       msg.includes('invalid') ||
       msg.includes('content policy');
-    if (isUnprocessable && options.model !== 'fal-ai/kling-video/v2.6/pro/text-to-video') {
-      // Retry with Kling
-      return await tryModel('fal-ai/kling-video/v2.6/pro/text-to-video');
+    if (isUnprocessable && primaryModel !== fallbackModel) {
+      // Kling only supports 5s/10s — clamp the duration to a valid value.
+      return await tryModel(fallbackModel, toKlingDuration(options.duration));
     }
     throw err;
   }

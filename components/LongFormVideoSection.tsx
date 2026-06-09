@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Linking } from 'react-native';
+import { Linking, Image } from 'react-native';
 import {
   YStack,
   XStack,
@@ -19,6 +19,8 @@ import {
   Download,
   Play,
   RefreshCw,
+  ImagePlus,
+  X,
 } from '@blinkdotnew/mobile-ui';
 import { VideoClipPlayer } from './VideoClipPlayer';
 import {
@@ -28,7 +30,10 @@ import {
   useGenerateAllScenes,
   useGenerateScene,
   useDeleteVideoProject,
+  useSetSceneScreenshot,
 } from '@/lib/hooks';
+import { extractSceneScreenshot } from '@/lib/agents';
+import { pickAndUploadScreenshot } from '@/lib/screenshots';
 import {
   VIDEO_MODELS,
   ASPECT_RATIOS,
@@ -174,7 +179,18 @@ export function LongFormVideoSection({ campaign, script }: Props) {
             <ProjectCard
               key={p.id}
               project={p}
-              onDelete={() => deleteMut.mutate({ id: p.id, campaignId: campaign.id })}
+              onDelete={async () => {
+                if (typeof window !== 'undefined' && !window.confirm(`Supprimer le montage « ${p.title} » ?`)) {
+                  return;
+                }
+                try {
+                  await deleteMut.mutateAsync({ id: p.id, campaignId: campaign.id });
+                  toast('Montage supprimé', { message: 'Le projet a été retiré.', variant: 'success' });
+                } catch (err: any) {
+                  if (__DEV__) console.error('[deleteVideoProject] RAW ERROR →', err);
+                  toast('Suppression impossible', { message: describeGenerationError(err), variant: 'error' });
+                }
+              }}
             />
           ))}
         </YStack>
@@ -187,7 +203,9 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
   const { data: scenes = [] } = useVideoScenes(project.id);
   const generateAllMut = useGenerateAllScenes();
   const generateOneMut = useGenerateScene();
+  const setShotMut = useSetSceneScreenshot();
   const [playingSceneIdx, setPlayingSceneIdx] = useState<number | null>(null);
+  const [uploadingSceneId, setUploadingSceneId] = useState<string | null>(null);
 
   const readyScenes = scenes.filter((s: VideoScene) => s.status === 'ready' && s.video_url);
   const allReady = scenes.length > 0 && readyScenes.length === scenes.length;
@@ -224,6 +242,42 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
       toast('Vidéo prête !', { message: 'Toutes les scènes sont générées.', variant: 'success' });
     } catch (err: any) {
       toast('Partiellement échoué', { message: describeGenerationError(err), variant: 'error' });
+    }
+  }
+
+  async function handleSetScreenshot(scene: VideoScene) {
+    try {
+      setUploadingSceneId(scene.id);
+      const url = await pickAndUploadScreenshot(project.id);
+      if (!url) return;
+      await setShotMut.mutateAsync({
+        sceneId: scene.id,
+        projectId: project.id,
+        prompt: scene.prompt || '',
+        imageUrl: url,
+      });
+      toast('Capture liée à la scène', {
+        message: `La scène #${scene.scene_index} démarrera depuis cette page de ton appli.`,
+        variant: 'success',
+      });
+    } catch (err: any) {
+      if (__DEV__) console.error('[setSceneScreenshot] RAW ERROR →', err);
+      toast('Upload impossible', { message: describeGenerationError(err), variant: 'error' });
+    } finally {
+      setUploadingSceneId(null);
+    }
+  }
+
+  async function handleRemoveScreenshot(scene: VideoScene) {
+    try {
+      await setShotMut.mutateAsync({
+        sceneId: scene.id,
+        projectId: project.id,
+        prompt: scene.prompt || '',
+        imageUrl: null,
+      });
+    } catch (err: any) {
+      toast('Erreur', { message: describeGenerationError(err), variant: 'error' });
     }
   }
 
@@ -353,12 +407,19 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
           <SizableText size="$2" color="$color10" fontWeight="600" letterSpacing={0.5}>
             STORYBOARD ({scenes.length} SCÈNES)
           </SizableText>
+          <SizableText size="$1" color="$color10">
+            📱 Ajoute une capture d'écran à chaque scène pour montrer les vraies pages de
+            ton appli : la scène démarrera depuis cette image (image-to-video).
+          </SizableText>
           {scenes.map((scene: VideoScene) => (
             <SceneRow
               key={scene.id}
               scene={scene}
               onRegenerate={() => handleRegenerateScene(scene)}
               isRegenerating={generateOneMut.isPending && generateOneMut.variables?.sceneId === scene.id}
+              onAddScreenshot={() => handleSetScreenshot(scene)}
+              onRemoveScreenshot={() => handleRemoveScreenshot(scene)}
+              isUploadingScreenshot={uploadingSceneId === scene.id}
             />
           ))}
         </YStack>
@@ -371,12 +432,19 @@ function SceneRow({
   scene,
   onRegenerate,
   isRegenerating,
+  onAddScreenshot,
+  onRemoveScreenshot,
+  isUploadingScreenshot,
 }: {
   scene: VideoScene;
   onRegenerate: () => void;
   isRegenerating: boolean;
+  onAddScreenshot: () => void;
+  onRemoveScreenshot: () => void;
+  isUploadingScreenshot: boolean;
 }) {
   const isBusy = scene.status === 'generating' || isRegenerating;
+  const { imageUrl: screenshotUrl } = extractSceneScreenshot(scene.prompt || '');
 
   return (
     <YStack
@@ -421,6 +489,58 @@ function SceneRow({
           />
         ) : null}
       </XStack>
+
+      {/* Capture d'écran attachée à la scène (image-to-video) */}
+      {screenshotUrl ? (
+        <XStack gap="$2" alignItems="center">
+          <YStack
+            borderRadius="$2"
+            overflow="hidden"
+            borderWidth={1}
+            borderColor="$color5"
+            backgroundColor="$color2"
+          >
+            <Image
+              source={{ uri: screenshotUrl }}
+              style={{ width: 72, height: 72 }}
+              resizeMode="cover"
+            />
+          </YStack>
+          <YStack flex={1} gap="$1">
+            <SizableText size="$1" color="$color11" fontWeight="600">
+              📱 Capture liée — la scène démarre sur cette page
+            </SizableText>
+            <XStack gap="$2">
+              <Button
+                size="$2"
+                icon={isUploadingScreenshot ? <Spinner size="small" /> : <ImagePlus size={12} />}
+                disabled={isUploadingScreenshot || isBusy}
+                onPress={onAddScreenshot}
+              >
+                Changer
+              </Button>
+              <Button
+                size="$2"
+                chromeless
+                icon={<X size={12} color="$red10" />}
+                disabled={isBusy}
+                onPress={onRemoveScreenshot}
+              >
+                Retirer
+              </Button>
+            </XStack>
+          </YStack>
+        </XStack>
+      ) : (
+        <Button
+          size="$2"
+          icon={isUploadingScreenshot ? <Spinner size="small" /> : <ImagePlus size={12} />}
+          disabled={isUploadingScreenshot || isBusy}
+          onPress={onAddScreenshot}
+        >
+          {isUploadingScreenshot ? 'Upload…' : 'Ajouter une capture de cette page'}
+        </Button>
+      )}
 
       {scene.status === 'ready' && scene.video_url && (
         <VideoClipPlayer url={scene.video_url} aspectRatio="9:16" />
@@ -513,7 +633,7 @@ function SequentialPlayer({
         Télécharger cette scène
       </Button>
       <SizableText size="$1" color="$color10" textAlign="center">
-        💡 Télécharge chaque scène et assemble-les dans CapCut / iMovie / Premiere pour un montage final
+        💡 Utilise le bouton « Assembler les scènes en 1 vidéo » ci-dessous pour obtenir le MP4 complet automatiquement
       </SizableText>
     </YStack>
   );

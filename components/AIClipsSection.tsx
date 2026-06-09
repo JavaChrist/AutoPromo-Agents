@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Linking } from 'react-native';
+import { Linking, Image } from 'react-native';
 import {
   YStack,
   XStack,
@@ -19,10 +19,13 @@ import {
   Download,
   Wand2,
   Check,
+  ImagePlus,
+  X,
 } from '@blinkdotnew/mobile-ui';
 import { VideoClipPlayer } from './VideoClipPlayer';
 import { useVideoClips, useGenerateVideoClip, useDeleteVideoClip } from '@/lib/hooks';
 import { describeGenerationError, isAuthError } from '@/lib/blink';
+import { pickAndUploadScreenshot } from '@/lib/screenshots';
 import { VIDEO_MODELS, ASPECT_RATIOS, MODEL_DURATIONS, type VideoModel, type Campaign, type VideoScript, type VideoClip } from '@/lib/types';
 
 interface Props {
@@ -38,6 +41,8 @@ export function AIClipsSection({ campaign, script }: Props) {
   const [model, setModel] = useState<string>('fal-ai/veo3.1/fast');
   const [aspectRatio, setAspectRatio] = useState<string>('9:16');
   const [duration, setDuration] = useState<string>('8s');
+  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
+  const [uploadingShot, setUploadingShot] = useState(false);
 
   const durationOptions = MODEL_DURATIONS[model as VideoModel] ?? MODEL_DURATIONS['fal-ai/veo3.1/fast'];
 
@@ -50,9 +55,31 @@ export function AIClipsSection({ campaign, script }: Props) {
 
   const isGenerating = generateMut.isPending;
 
+  async function handlePickScreenshot() {
+    try {
+      setUploadingShot(true);
+      const publicUrl = await pickAndUploadScreenshot(campaign.id);
+      if (!publicUrl) return;
+      setScreenshotUrl(publicUrl);
+      toast('Capture ajoutée', { message: 'La vidéo démarrera depuis ton écran d’appli.', variant: 'success' });
+    } catch (err: any) {
+      if (__DEV__) console.error('[uploadScreenshot] RAW ERROR →', err);
+      toast('Upload impossible', { message: describeGenerationError(err), variant: 'error' });
+    } finally {
+      setUploadingShot(false);
+    }
+  }
+
   async function handleGenerate() {
     try {
-      await generateMut.mutateAsync({ campaign, script, model, aspectRatio, duration });
+      await generateMut.mutateAsync({
+        campaign,
+        script,
+        model,
+        aspectRatio,
+        duration,
+        imageUrl: screenshotUrl ?? undefined,
+      });
       toast('Clip vidéo prêt !', { message: 'Ton clip IA a été généré avec succès.', variant: 'success' });
     } catch (err: any) {
       if (isAuthError(err)) {
@@ -122,6 +149,64 @@ export function AIClipsSection({ campaign, script }: Props) {
                 placeholder="Durée"
               />
             </YStack>
+
+            {/* Capture d'écran → image-to-video pour un rendu fidèle à l'appli */}
+            <YStack gap="$2">
+              <Label color="$color12" fontWeight="600">
+                Capture d'écran de ton appli (optionnel)
+              </Label>
+
+              {screenshotUrl ? (
+                <YStack gap="$2">
+                  <YStack
+                    borderRadius="$3"
+                    overflow="hidden"
+                    borderWidth={1}
+                    borderColor="$color5"
+                    backgroundColor="$color3"
+                  >
+                    <Image
+                      source={{ uri: screenshotUrl }}
+                      style={{ width: '100%', height: 180 }}
+                      resizeMode="contain"
+                    />
+                  </YStack>
+                  <XStack gap="$2">
+                    <Button
+                      flex={1}
+                      size="$3"
+                      icon={uploadingShot ? <Spinner size="small" /> : <ImagePlus size={14} />}
+                      disabled={uploadingShot}
+                      onPress={handlePickScreenshot}
+                    >
+                      Changer
+                    </Button>
+                    <Button
+                      flex={1}
+                      size="$3"
+                      icon={<X size={14} color="$red10" />}
+                      onPress={() => setScreenshotUrl(null)}
+                    >
+                      Retirer
+                    </Button>
+                  </XStack>
+                </YStack>
+              ) : (
+                <Button
+                  size="$3"
+                  icon={uploadingShot ? <Spinner size="small" /> : <ImagePlus size={16} />}
+                  disabled={uploadingShot}
+                  onPress={handlePickScreenshot}
+                >
+                  {uploadingShot ? 'Upload en cours…' : 'Ajouter une capture d’écran'}
+                </Button>
+              )}
+
+              <SizableText size="$1" color="$color10">
+                📱 La vidéo démarrera depuis cette image (image-to-video) : l'interface
+                montrée sera exactement celle de ton appli, animée par l'IA.
+              </SizableText>
+            </YStack>
           </YStack>
 
           {/* Progression de l'agent pendant la génération */}
@@ -175,7 +260,16 @@ export function AIClipsSection({ campaign, script }: Props) {
             <ClipCard
               key={clip.id}
               clip={clip}
-              onDelete={() => deleteMut.mutate({ id: clip.id, campaignId: campaign.id })}
+              onDelete={async () => {
+                if (typeof window !== 'undefined' && !window.confirm('Supprimer ce clip ?')) return;
+                try {
+                  await deleteMut.mutateAsync({ id: clip.id, campaignId: campaign.id });
+                  toast('Clip supprimé', { message: 'Le clip a été retiré.', variant: 'success' });
+                } catch (err: any) {
+                  if (__DEV__) console.error('[deleteVideoClip] RAW ERROR →', err);
+                  toast('Suppression impossible', { message: describeGenerationError(err), variant: 'error' });
+                }
+              }}
             />
           ))}
         </YStack>

@@ -3,7 +3,7 @@ import { getErrorMessage } from '../blink';
 import { db } from '../db';
 import { normalizeProject, normalizeScene } from '../normalizers';
 import type { Campaign, VideoScript, VideoProject, VideoScene } from '../types';
-import { planVideoScenes, generateSceneClip } from '../agents';
+import { planVideoScenes, generateSceneClip, setSceneScreenshot } from '../agents';
 
 // ─── Long-form video projects ────────────────────────────────────────────────
 
@@ -121,6 +121,15 @@ export function useGenerateScene() {
           status: 'ready',
         });
       } catch (err) {
+        if (__DEV__) {
+          console.error('[generateScene] RAW ERROR →', err);
+          console.error('[generateScene] details →', {
+            message: (err as any)?.message,
+            status: (err as any)?.status ?? (err as any)?.details?.status,
+            details: (err as any)?.details,
+            body: (err as any)?.details?.body,
+          });
+        }
         const msg = getErrorMessage(err);
         await db.videoScenes.update(input.sceneId, { status: 'failed', error: msg }).catch(() => {});
         throw new Error(msg);
@@ -185,6 +194,26 @@ export function useGenerateAllScenes() {
     onSettled: (_, __, variables) => {
       qc.invalidateQueries({ queryKey: ['video_projects', variables.project.campaign_id] });
       qc.invalidateQueries({ queryKey: ['video_scenes', variables.project.id] });
+    },
+  });
+}
+
+/** Attach or remove (imageUrl: null) a screenshot on a scene — the scene will be generated in image-to-video mode. */
+export function useSetSceneScreenshot() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      sceneId: string;
+      projectId: string;
+      prompt: string;
+      imageUrl: string | null;
+    }) => {
+      await db.videoScenes.update(input.sceneId, {
+        prompt: setSceneScreenshot(input.prompt, input.imageUrl),
+      });
+    },
+    onSettled: (_, __, variables) => {
+      qc.invalidateQueries({ queryKey: ['video_scenes', variables.projectId] });
     },
   });
 }

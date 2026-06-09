@@ -1,0 +1,65 @@
+import * as ImagePicker from 'expo-image-picker';
+
+/**
+ * Screenshots are hosted on Vercel Blob (via /api/upload) and NOT on Blink
+ * storage: Blink rewrites uploads to `…/<uuid>.blob`, and the AI video models
+ * reject any image_url whose path doesn't end with .png/.jpg/etc.
+ *
+ * In local dev (expo on localhost) there is no /api server, so we call the
+ * deployed endpoint directly (CORS is open on it).
+ */
+const PROD_BASE = 'https://auto-promo-agents.vercel.app';
+
+function apiBase(): string {
+  if (process.env.EXPO_PUBLIC_API_BASE) return process.env.EXPO_PUBLIC_API_BASE;
+  if (typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) {
+    return PROD_BASE;
+  }
+  return '';
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+    reader.onerror = () => reject(reader.error ?? new Error('Lecture du fichier impossible'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Opens the image picker and uploads the chosen screenshot.
+ * Returns its public URL (ending with the image extension), or null if cancelled.
+ */
+export async function pickAndUploadScreenshot(_pathPrefix: string): Promise<string | null> {
+  const res = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ['images'],
+    quality: 1,
+  });
+  if (res.canceled || !res.assets?.length) return null;
+
+  const asset = res.assets[0];
+  const blob = await (await fetch(asset.uri)).blob();
+  if (blob.size > 4 * 1024 * 1024) {
+    throw new Error('Image trop lourde (max 4 Mo). Réduis la taille de la capture.');
+  }
+
+  const ext = (asset.mimeType?.split('/')[1] || 'png').replace('jpeg', 'jpg');
+  const data = await blobToBase64(blob);
+
+  const response = await fetch(`${apiBase()}/api/upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data, ext }),
+  });
+
+  const text = await response.text();
+  let json: any;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error("L'API d'upload n'est pas disponible. Redéploie le site sur Vercel.");
+  }
+  if (!response.ok) throw new Error(json?.error || "Échec de l'upload de la capture.");
+  return json.url as string;
+}

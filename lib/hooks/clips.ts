@@ -35,15 +35,16 @@ export function useGenerateVideoClip() {
       model: string;
       aspectRatio: string;
       duration: string;
+      imageUrl?: string;
     }) => {
-      const { campaign, script, model, aspectRatio, duration } = input;
+      const { campaign, script, model, aspectRatio, duration, imageUrl } = input;
 
       try {
         // ✅ Correct pattern: generate FIRST, save AFTER
         const { video_url, prompt } = await generateVideoFromScript(
           campaign,
           script,
-          { model, aspect_ratio: aspectRatio, duration }
+          { model, aspect_ratio: aspectRatio, duration, image_url: imageUrl }
         );
 
         const row = await db.videoClips.create({

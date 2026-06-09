@@ -22,11 +22,22 @@ export function getErrorMessage(err: unknown): string {
   if (!err) return 'Erreur inconnue';
   if (typeof err === 'string') return err;
   const e = err as any;
-  // Blink SDK wraps original error in details
+  // Blink SDK wraps the original API error in several possible places. Prefer
+  // the most specific/detailed reason (e.g. the API's 400 body) over the
+  // generic top-level message like "Unprocessable Entity".
+  const detailBody =
+    typeof e?.details?.body === 'string'
+      ? e.details.body
+      : e?.details?.body
+        ? JSON.stringify(e.details.body)
+        : undefined;
   const msg =
-    e?.message ||
-    e?.details?.message ||
+    e?.details?.error?.message ||
     e?.details?.originalError?.message ||
+    detailBody ||
+    e?.details?.message ||
+    e?.response?.data?.error ||
+    e?.message ||
     e?.cause?.message ||
     JSON.stringify(e);
   if (typeof msg === 'string') return msg;
