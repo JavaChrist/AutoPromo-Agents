@@ -336,6 +336,33 @@ export async function generateSceneClip(
   }
 }
 
+// ─── Voix off (text-to-speech) ───────────────────────────────────────────────
+
+export type VoiceoverVoice = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
+
+export const VOICEOVER_VOICES: { value: VoiceoverVoice; label: string }[] = [
+  { value: 'nova', label: 'Nova — féminine, énergique' },
+  { value: 'shimmer', label: 'Shimmer — féminine, douce' },
+  { value: 'alloy', label: 'Alloy — neutre, polyvalente' },
+  { value: 'echo', label: 'Echo — masculine, posée' },
+  { value: 'onyx', label: 'Onyx — masculine, grave' },
+  { value: 'fable', label: 'Fable — chaleureuse, conteuse' },
+];
+
+/** Generates the voiceover audio (MP3 URL) from the script's voiceover text. */
+export async function generateVoiceover(
+  text: string,
+  voice: VoiceoverVoice = 'nova'
+): Promise<string> {
+  await ensureAuthForAI();
+  const { url } = await blink.ai.generateSpeech({
+    text,
+    voice,
+    response_format: 'mp3',
+  });
+  return url;
+}
+
 // ─── Campaign strategy: multi-wave plan ──────────────────────────────────────
 
 export interface WavePlan {

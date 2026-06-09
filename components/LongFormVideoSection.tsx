@@ -32,7 +32,12 @@ import {
   useDeleteVideoProject,
   useSetSceneScreenshot,
 } from '@/lib/hooks';
-import { extractSceneScreenshot } from '@/lib/agents';
+import {
+  extractSceneScreenshot,
+  generateVoiceover,
+  VOICEOVER_VOICES,
+  type VoiceoverVoice,
+} from '@/lib/agents';
 import { pickAndUploadScreenshot } from '@/lib/screenshots';
 import {
   VIDEO_MODELS,
@@ -213,7 +218,11 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
   const failedScenes = scenes.filter((s: VideoScene) => s.status === 'failed');
 
   const [merging, setMerging] = useState(false);
+  const [mergeStep, setMergeStep] = useState<string | null>(null);
   const [mergedUrl, setMergedUrl] = useState<string | null>(null);
+  const [voice, setVoice] = useState<string>('none');
+
+  const voiceoverText = (project.voiceover_full || '').trim();
 
   async function handleMerge() {
     const urls = [...readyScenes]
@@ -226,13 +235,26 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
     }
     setMerging(true);
     try {
-      const { url } = await mergeScenes(urls, project.title);
+      // 1. Voix off (optionnelle) : TTS du texte du script
+      let audioUrl: string | undefined;
+      if (voice !== 'none' && voiceoverText) {
+        setMergeStep('🎙️ Génération de la voix off…');
+        audioUrl = await generateVoiceover(voiceoverText, voice as VoiceoverVoice);
+      }
+
+      // 2. Assemblage + mixage côté serveur
+      setMergeStep(audioUrl ? '🎬 Assemblage + mixage de la voix…' : '🎬 Assemblage des scènes…');
+      const { url } = await mergeScenes(urls, project.title, { audioUrl });
       setMergedUrl(url);
-      toast('Vidéo assemblée !', { message: 'Ton montage complet est prêt.', variant: 'success' });
+      toast('Vidéo assemblée !', {
+        message: audioUrl ? 'Montage complet avec voix off prêt.' : 'Ton montage complet est prêt.',
+        variant: 'success',
+      });
     } catch (err: any) {
-      toast('Fusion impossible', { message: err?.message || 'Réessaye plus tard.', variant: 'error' });
+      toast('Fusion impossible', { message: describeGenerationError(err), variant: 'error' });
     } finally {
       setMerging(false);
+      setMergeStep(null);
     }
   }
 
@@ -367,6 +389,30 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
             borderWidth={1}
             borderColor="$accent6"
           >
+            {/* Voix off optionnelle (texte du script → TTS, mixée au montage) */}
+            <YStack gap="$2">
+              <Label color="$color12" fontWeight="600">🎙️ Voix off</Label>
+              <BlinkSelect
+                items={[
+                  { label: 'Sans voix off', value: 'none' },
+                  ...VOICEOVER_VOICES.map((v) => ({ label: v.label, value: v.value })),
+                ]}
+                value={voice}
+                onValueChange={setVoice}
+                placeholder="Voix off"
+              />
+              {voice !== 'none' && !voiceoverText ? (
+                <SizableText size="$1" color="$red10">
+                  Aucun texte de voix off dans ce projet — régénère le script d'abord
+                  (onglet Script), puis recrée le projet.
+                </SizableText>
+              ) : voice !== 'none' ? (
+                <SizableText size="$1" color="$color10" numberOfLines={3}>
+                  Texte lu : « {voiceoverText} »
+                </SizableText>
+              ) : null}
+            </YStack>
+
             <Button
               size="$4"
               backgroundColor={merging ? '$color3' : '#7C5CFF'}
@@ -377,7 +423,9 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
               onPress={handleMerge}
               pressStyle={{ scale: 0.97 }}
             >
-              {merging ? 'Assemblage en cours…' : `Assembler les ${readyScenes.length} scènes en 1 vidéo`}
+              {merging
+                ? mergeStep || 'Assemblage en cours…'
+                : `Assembler les ${readyScenes.length} scènes en 1 vidéo`}
             </Button>
 
             {mergedUrl && (

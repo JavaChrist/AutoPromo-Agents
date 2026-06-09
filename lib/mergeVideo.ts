@@ -8,11 +8,15 @@ export interface MergeResult {
  * single MP4. Only works on the deployed site (Vercel) or under `vercel dev` —
  * in `expo start --web` there is no /api server, so we surface a clear message.
  */
-export async function mergeScenes(urls: string[], fileName?: string): Promise<MergeResult> {
+export async function mergeScenes(
+  urls: string[],
+  fileName?: string,
+  options?: { audioUrl?: string }
+): Promise<MergeResult> {
   const res = await fetch('/api/merge', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ urls, fileName }),
+    body: JSON.stringify({ urls, fileName, audioUrl: options?.audioUrl }),
   });
 
   const text = await res.text();

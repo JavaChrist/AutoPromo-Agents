@@ -47,6 +47,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const body = (typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body) || {};
   const urls: string[] = Array.isArray(body.urls) ? body.urls : [];
   const fileName: string = typeof body.fileName === 'string' ? body.fileName : 'video';
+  const audioUrl: string | undefined = typeof body.audioUrl === 'string' ? body.audioUrl : undefined;
 
   if (urls.length < 2) {
     res.status(400).json({ error: 'Fournis au moins 2 scènes à assembler.' });
@@ -99,7 +100,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       ]);
     }
 
-    const data = await fs.readFile(out);
+    // Optional voiceover: mix it over the merged video's audio (background
+    // lowered to 25%), or use it as the only track if the video is silent.
+    let finalFile = out;
+    if (audioUrl) {
+      const voiceFile = path.join(work, 'voice.mp3');
+      await downloadTo(audioUrl, voiceFile);
+      const outVoice = path.join(work, 'final_voice.mp4');
+      try {
+        await runFfmpeg(ffmpegPath, [
+          '-y', '-i', out, '-i', voiceFile,
+          '-filter_complex',
+          '[0:a]volume=0.25[bg];[1:a]apad[vo];[bg][vo]amix=inputs=2:duration=first:dropout_transition=0[a]',
+          '-map', '0:v', '-map', '[a]',
+          '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k',
+          '-movflags', '+faststart', outVoice,
+        ]);
+      } catch {
+        // The merged video probably has no audio track → voiceover becomes the only track.
+        await runFfmpeg(ffmpegPath, [
+          '-y', '-i', out, '-i', voiceFile,
+          '-filter_complex', '[1:a]apad[a]',
+          '-map', '0:v', '-map', '[a]',
+          '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k',
+          '-shortest', '-movflags', '+faststart', outVoice,
+        ]);
+      }
+      finalFile = outVoice;
+    }
+
+    const data = await fs.readFile(finalFile);
     const safeName = fileName.replace(/[^a-z0-9-_]+/gi, '-').slice(0, 60) || 'video';
     const blob = await put(`merged/${safeName}-${Date.now()}.mp4`, data, {
       access: 'public',
