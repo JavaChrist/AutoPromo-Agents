@@ -73,6 +73,17 @@ export default function CampaignDetail() {
 
   async function handleDelete() {
     if (!id) return;
+    // Guard against accidental clicks: deleting a campaign is irreversible and
+    // cascades to scripts, posts, clips, projects, scenes and waves.
+    const name = campaign?.product_name ? `« ${campaign.product_name} »` : 'cette campagne';
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm(
+        `Supprimer ${name} ?\n\nToute la campagne sera définitivement effacée : script, posts, clips vidéo, montages et plan. Cette action est irréversible.`
+      )
+    ) {
+      return;
+    }
     try {
       await deleteMut.mutateAsync(id);
       router.back();
