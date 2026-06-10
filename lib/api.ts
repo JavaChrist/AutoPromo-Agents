@@ -38,7 +38,14 @@ export async function postJSON<T = any>(path: string, body: unknown): Promise<T>
     );
   }
   if (!res.ok) {
-    throw new Error(json?.error || `Échec de la requête IA (${res.status}).`);
+    const rawError = json?.error;
+    const message =
+      typeof rawError === 'string'
+        ? rawError
+        : rawError
+          ? JSON.stringify(rawError)
+          : `Échec de la requête IA (${res.status}).`;
+    throw new Error(message);
   }
   return json as T;
 }

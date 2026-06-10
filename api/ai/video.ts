@@ -67,11 +67,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     const data = await apiRes.json().catch(() => null);
     if (!apiRes.ok) {
-      const msg =
+      const rawMsg =
         data?.detail?.[0]?.msg ||
         (typeof data?.detail === 'string' ? data.detail : undefined) ||
+        data?.error?.message ||
         data?.error ||
         `fal.ai a répondu ${apiRes.status}`;
+      const msg = typeof rawMsg === 'string' ? rawMsg : JSON.stringify(rawMsg);
       // Surface the exact upstream error in Vercel runtime logs for debugging.
       console.error('[ai/video] fal.ai error', {
         status: apiRes.status,
@@ -92,6 +94,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     res.status(200).json({ video_url });
   } catch (err: any) {
-    res.status(500).json({ error: err?.message || 'Échec de la génération vidéo.' });
+    const message =
+      typeof err?.message === 'string' ? err.message : JSON.stringify(err?.message ?? err);
+    console.error('[ai/video] exception', { message, err: String(err) });
+    res.status(500).json({ error: message || 'Échec de la génération vidéo.' });
   }
 }
