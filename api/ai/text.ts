@@ -62,6 +62,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const data = await apiRes.json().catch(() => null);
     if (!apiRes.ok) {
       const msg = data?.error?.message || `Gemini a répondu ${apiRes.status}`;
+      // Surface the exact upstream error in Vercel runtime logs for debugging.
+      console.error('[ai/text] Gemini error', {
+        status: apiRes.status,
+        model,
+        message: msg,
+        keyPrefix: apiKey ? `${apiKey.slice(0, 6)}…(${apiKey.length} chars)` : 'MISSING',
+      });
       res.status(502).json({ error: msg });
       return;
     }
