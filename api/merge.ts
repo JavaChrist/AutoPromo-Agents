@@ -5,8 +5,6 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { put } from '@vercel/blob';
 import ffmpegPath from 'ffmpeg-static';
-import satori from 'satori';
-import { Resvg } from '@resvg/resvg-js';
 
 interface Overlays {
   title?: string;
@@ -72,17 +70,6 @@ function chip(text: string, fontSize: number, maxWidth: number, bgOpacity = 0.5,
   };
 }
 
-/** Renders a Satori VDOM tree to a full-frame transparent PNG file. */
-async function renderPng(element: any, W: number, H: number, fontData: Buffer, outFile: string): Promise<void> {
-  const svg = await satori(element, {
-    width: W,
-    height: H,
-    fonts: [{ name: 'Inter', data: fontData, weight: 700, style: 'normal' }],
-  });
-  const png = new Resvg(svg, { fitTo: { mode: 'width', value: W } }).render().asPng();
-  await fs.writeFile(outFile, png);
-}
-
 function topElement(title: string, W: number, H: number): any {
   return {
     type: 'div',
@@ -139,11 +126,32 @@ async function buildOverlay(
 
   const font = findFontFile();
   if (!font) return { reason: 'police introuvable côté serveur' };
-  const fontData = await fs.readFile(font);
 
+  // Loaded lazily so a native-module load failure (resvg) only disables the
+  // overlay — it never crashes the whole merge function.
+  let satori: any;
+  let Resvg: any;
+  try {
+    satori = (await import('satori')).default;
+    ({ Resvg } = await import('@resvg/resvg-js'));
+  } catch {
+    return { reason: 'moteur de rendu texte indisponible côté serveur' };
+  }
+
+  const fontData = await fs.readFile(font);
   const { W, H } = overlayDims(aspectRatio);
   const ctaStart =
     typeof totalDuration === 'number' && totalDuration > 6 ? Math.max(0, Math.round(totalDuration - 4)) : 0;
+
+  const renderPng = async (element: any, outFile: string): Promise<void> => {
+    const svg = await satori(element, {
+      width: W,
+      height: H,
+      fonts: [{ name: 'Inter', data: fontData, weight: 700, style: 'normal' }],
+    });
+    const png = new Resvg(svg, { fitTo: { mode: 'width', value: W } }).render().asPng();
+    await fs.writeFile(outFile, png);
+  };
 
   const inputs: string[] = [];
   const fc: string[] = [`[0:v]scale=${W}:${H},setsar=1[v0]`];
@@ -152,7 +160,7 @@ async function buildOverlay(
 
   if (overlays.title?.trim()) {
     const p = path.join(work, 'ov_top.png');
-    await renderPng(topElement(overlays.title.trim(), W, H), W, H, fontData, p);
+    await renderPng(topElement(overlays.title.trim(), W, H), p);
     inputs.push('-i', p);
     fc.push(`[${cur}][${idx}:v]overlay=0:0[v${idx}]`);
     cur = `v${idx}`;
@@ -160,7 +168,7 @@ async function buildOverlay(
   }
   if (overlays.cta?.trim() || overlays.url?.trim()) {
     const p = path.join(work, 'ov_bottom.png');
-    await renderPng(bottomElement(overlays.cta?.trim(), overlays.url?.trim(), W, H), W, H, fontData, p);
+    await renderPng(bottomElement(overlays.cta?.trim(), overlays.url?.trim(), W, H), p);
     inputs.push('-i', p);
     const en = ctaStart > 0 ? `:enable='gte(t,${ctaStart})'` : '';
     fc.push(`[${cur}][${idx}:v]overlay=0:0${en}[v${idx}]`);
