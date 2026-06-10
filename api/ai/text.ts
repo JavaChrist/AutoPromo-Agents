@@ -43,16 +43,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
 
     const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
     const generationConfig: Record<string, any> = { responseMimeType: 'application/json' };
     if (schema && typeof schema === 'object') {
       generationConfig.responseSchema = schema;
     }
 
+    // Pass the key via the `x-goog-api-key` header (NOT the legacy `?key=` query
+    // param). The newer Google AI Studio "auth keys" (prefix `AQ.`, bound to a
+    // service account) are rejected on the query param but accepted via header;
+    // legacy `AIza…` keys work both ways.
     const apiRes = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig,
