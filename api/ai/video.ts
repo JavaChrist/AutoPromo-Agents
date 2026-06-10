@@ -72,6 +72,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         (typeof data?.detail === 'string' ? data.detail : undefined) ||
         data?.error ||
         `fal.ai a répondu ${apiRes.status}`;
+      // Surface the exact upstream error in Vercel runtime logs for debugging.
+      console.error('[ai/video] fal.ai error', {
+        status: apiRes.status,
+        model,
+        message: msg,
+        body: data,
+        keyPrefix: falKey ? `${falKey.slice(0, 8)}…(${falKey.length} chars)` : 'MISSING',
+      });
       res.status(apiRes.status >= 400 && apiRes.status < 500 ? apiRes.status : 502).json({ error: msg });
       return;
     }
