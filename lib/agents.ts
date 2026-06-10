@@ -100,6 +100,19 @@ Contenu prêt à publier (pas de markdown, pas d'instructions). Les hashtags : s
 
 // ─── Clip vidéo IA ────────────────────────────────────────────────────────────
 
+/**
+ * Each fal video model expects a different `duration` format:
+ * - Veo 3.1   → string with "s"  ("4s" | "6s" | "8s")
+ * - Sora 2    → integer seconds  (4 | 8 | 12 | 16 | 20)
+ * - Kling 2.6 → string seconds   ("5" | "10")
+ */
+function formatDuration(model: string, duration: string): string | number {
+  const seconds = parseInt(duration, 10) || 8;
+  if (model.includes('kling')) return String(seconds);
+  if (model.includes('sora')) return seconds;
+  return `${seconds}s`;
+}
+
 /** Generate a video clip via the backend fal.ai route. */
 async function generateVideo(options: {
   prompt: string;
@@ -111,8 +124,7 @@ async function generateVideo(options: {
   const input: Record<string, any> = {
     prompt: options.prompt,
     aspect_ratio: options.aspect_ratio,
-    // Kling expects bare seconds ("5"/"10"); other models accept "8s" etc.
-    duration: options.model.includes('kling') ? options.duration.replace(/s$/i, '') : options.duration,
+    duration: formatDuration(options.model, options.duration),
   };
   if (options.image_url) input.image_url = options.image_url;
 
