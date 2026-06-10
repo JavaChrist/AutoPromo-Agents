@@ -42,13 +42,13 @@ Cible : ${campaign.target_audience || 'grand public'}
 URL : ${campaign.product_url || 'n/a'}
 ${toneInstruction}
 
-Le script doit être en français, percutant dès la première seconde (règle des 3s), avec un CTA clair à la fin. Le storyboard décrit 4-5 plans avec timings précis.`,
+IMPORTANT : tout le contenu généré (hook, storyboard, voix off, CTA) doit être rédigé OBLIGATOIREMENT en français. Le script doit être percutant dès la première seconde (règle des 3s), avec un CTA clair à la fin. Le storyboard décrit 4-5 plans avec timings précis.`,
     {
       type: 'object',
       properties: {
-        hook: { type: 'string', description: "Phrase d'accroche des 3 premières secondes" },
-        storyboard: { type: 'string', description: 'Description plan par plan avec timings (0-3s, 3-8s, etc.)' },
-        voiceover: { type: 'string', description: 'Texte complet de la voix off (max 75 mots pour 30s)' },
+        hook: { type: 'string', description: "Phrase d'accroche des 3 premières secondes, en français" },
+        storyboard: { type: 'string', description: 'Description plan par plan avec timings (0-3s, 3-8s, etc.), en français' },
+        voiceover: { type: 'string', description: 'Texte complet de la voix off EN FRANÇAIS (max 75 mots pour 30s)' },
         cta: { type: 'string', description: "Appel à l'action final" },
         duration_sec: { type: 'number', description: 'Durée totale en secondes' },
       },
