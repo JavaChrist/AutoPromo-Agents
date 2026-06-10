@@ -16,7 +16,7 @@ interface PostResult {
 
 /** Structured text generation via the backend Gemini route. */
 async function generateObject<T>(prompt: string, schema: object): Promise<T> {
-  const { object } = await postJSON<{ object: T }>('/api/ai/text', { prompt, schema });
+  const { object } = await postJSON<{ object: T }>('/api/ai/text', { prompt, schema }, { retries: 2 });
   return object;
 }
 
@@ -380,7 +380,7 @@ export async function generateVoiceover(
   text: string,
   voice: VoiceoverVoice = 'nova'
 ): Promise<string> {
-  const { url } = await postJSON<{ url: string }>('/api/ai/speech', { text, voice });
+  const { url } = await postJSON<{ url: string }>('/api/ai/speech', { text, voice }, { retries: 2 });
   return url;
 }
 

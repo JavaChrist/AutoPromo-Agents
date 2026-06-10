@@ -29,6 +29,11 @@ export async function mergeScenes(
     );
   }
 
-  if (!res.ok) throw new Error(json?.error || 'Échec de la fusion.');
+  if (!res.ok) {
+    const rawError = json?.error;
+    const message =
+      typeof rawError === 'string' ? rawError : rawError ? JSON.stringify(rawError) : 'Échec de la fusion.';
+    throw new Error(message);
+  }
   return json as MergeResult;
 }
