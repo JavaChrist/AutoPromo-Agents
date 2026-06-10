@@ -1,79 +1,91 @@
-# Expo React Native Template
+# AutoPromo Agent Suite
 
-This is a React Native template using Expo Router and configured for web, iOS, and Android development.
+Application web (Expo / React Native Web) qui génère automatiquement, à partir d'un simple pitch produit, une **campagne de promotion complète** : script vidéo, posts pour les réseaux sociaux (Instagram, X, Facebook, LinkedIn), clips vidéo IA, vidéos long format multi-scènes, voix off et plan de campagne en plusieurs vagues.
 
-## Quick Start
+## Architecture
+
+L'app est 100 % autonome (plus de dépendance à Blink) et repose sur :
+
+- **Frontend** : Expo Router + React Native Web, UI [Tamagui](https://tamagui.dev) (barrel local `components/ui`).
+- **Base de données** : [Supabase](https://supabase.com) (Postgres). Couche d'accès `lib/db.ts` (adaptateur type `db.table.list/get/create/update/delete`).
+- **Agents IA** : routes serverless Vercel sous `api/ai/` appelées par `lib/agents.ts`.
+  - **Texte** (scripts, posts, plans) → Google **Gemini** (`/api/ai/text`).
+  - **Vidéo** (clips, scènes, image-to-video) → **fal.ai** (Veo 3.1 / Sora 2 / Kling) (`/api/ai/video`).
+  - **Voix off** (TTS) → **OpenAI**, hébergée sur Vercel Blob (`/api/ai/speech`).
+- **Montage vidéo** : `api/merge.ts` (ffmpeg) concatène les scènes, mixe la voix off et **incruste du texte** (titre / CTA / URL) via Satori + filtre `overlay`.
+- **Stockage de fichiers** : Vercel Blob (captures d'écran, audio, vidéos assemblées).
+
+## Variables d'environnement
+
+### Local (`.env.local`) — pour le développement
+```env
+EXPO_PUBLIC_SUPABASE_URL=https://<projet>.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=<clé publique Supabase>
+```
+> En dev local, l'app appelle automatiquement le backend `/api` **déployé** (les clés IA ne sont donc pas nécessaires en local).
+
+### Vercel (Project Settings → Environment Variables) — pour la production
+| Variable | Usage |
+|---|---|
+| `EXPO_PUBLIC_SUPABASE_URL` | URL du projet Supabase |
+| `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Clé publique Supabase |
+| `GOOGLE_API_KEY` (ou `GEMINI_API_KEY`) | Gemini — génération de texte. Clé créée sur [AI Studio](https://aistudio.google.com/apikey). Envoyée via l'en-tête `x-goog-api-key` (compatible clés `AIza…` et `AQ.…`). |
+| `FAL_KEY` | fal.ai — génération vidéo (compte à approvisionner sur [fal.ai/dashboard/billing](https://fal.ai/dashboard/billing)) |
+| `OPENAI_API_KEY` | OpenAI — voix off (TTS) |
+| `BLOB_READ_WRITE_TOKEN` | Vercel Blob — stockage des captures, audio et montages |
+
+Options facultatives : `GEMINI_MODEL` (défaut `gemini-2.5-flash`), `OPENAI_TTS_MODEL` (défaut `tts-1`), `EXPO_PUBLIC_API_BASE` (forcer l'URL du backend).
+
+## Démarrage
 
 ```bash
-# Fast installation with Bun (recommended)
-bun install
-
-# Or use npm (slower but more stable)
 npm install
-
-# Start development server
+# Renseigner .env.local (voir ci-dessus)
 npm run dev
 ```
+L'app est disponible sur `http://localhost:3000`.
 
-The app will be available at `http://localhost:3000`
+### Base de données Supabase
+Le schéma (8 tables) est géré par migrations Supabase :
+`campaigns`, `video_scripts`, `social_posts`, `video_clips`, `video_projects`, `video_scenes`, `campaign_waves`, `wave_posts`.
 
-## Available Commands
+## Commandes
 
-### Development
-- `npm run dev` - Start development server for web on port 3000
-- `npm start` - Start development server (shows QR code for mobile)
-- `npm run start:web` - Start web development server
-- `npm run start:ios` - Start iOS development server
-- `npm run start:android` - Start Android development server
+- `npm run dev` — serveur de dev web (port 3000)
+- `npm start` — serveur de dev (QR code mobile)
+- `npm run build:web` — build web de production (`expo export`)
+- `npm run lint` — lint (ESLint / eslint-config-expo)
+- `npm run doctor` — diagnostic Expo
 
-### Building
-- `npm run build:web` - Build for web production
-- `npm run build:ios` - Build for iOS
-- `npm run build:android` - Build for Android
-
-### Package Management (Bun - Fast)
-- `bun install` - Install dependencies (fastest)
-- `npm run install:fast` - Install with Bun, skip postinstall (very fast)
-- `npm run add <package>` - Add package with Bun
-- `npm run setup` - Run Expo install for native linking
-
-### Package Management (npm - Stable)
-- `npm install` - Install dependencies (slower but stable)
-- `npm run setup` - Run Expo install for native linking
-
-### Utilities
-- `npm run doctor` - Check project setup and dependencies
-- `npm run upgrade` - Upgrade Expo SDK and dependencies
-- `npm run lint` - Run linting
-- `npm run eject` - Eject from Expo (use with caution)
-
-## Project Structure
+## Structure du projet
 
 ```
-├── app/                 # Expo Router pages
-├── components/          # Reusable components
-├── assets/             # Images, fonts, etc.
-├── hooks/              # Custom hooks
-└── package.json        # Dependencies and scripts
+├── app/                  # Écrans (Expo Router) : index, new, campaign/[id]
+├── api/                  # Routes serverless Vercel
+│   ├── ai/               #   text (Gemini), video (fal.ai), speech (OpenAI)
+│   ├── merge.ts          #   montage ffmpeg + voix off + incrustation
+│   └── upload.ts         #   upload des captures (Vercel Blob)
+├── components/
+│   ├── ui/               # Kit UI local (Tamagui + icônes lucide + composants custom)
+│   └── *.tsx             # Sections (clips, long format, plan de campagne…)
+├── lib/
+│   ├── agents.ts         # Agents IA (appellent le backend, mêmes signatures)
+│   ├── api.ts            # Helper fetch + réessais sur erreurs transitoires
+│   ├── db.ts             # Adaptateur Supabase
+│   ├── supabase.ts       # Client Supabase
+│   ├── hooks/            # Hooks React Query (campaigns, clips, projects, waves…)
+│   ├── normalizers.ts    # snake_case ↔ camelCase
+│   └── types.ts          # Types + presets (modèles vidéo, durées, plateformes)
+├── tamagui.config.ts     # Configuration Tamagui
+└── vercel.json           # Build + config des fonctions (maxDuration, includeFiles)
 ```
 
-## Performance Tips
+## Déploiement
 
-### For fastest installation:
-1. Use `bun install` (2-10x faster than npm)
-2. Use `npm run install:fast` to skip postinstall steps
-3. Only run `npm run setup` when you need native linking
+Le projet se déploie sur **Vercel** (build `expo export --platform web`, sortie `dist/`). Un push sur `main` déclenche un déploiement automatique. Penser à renseigner les variables d'environnement de production avant le premier déploiement.
 
-### For most stable installation:
-1. Use `npm install` (slower but more compatible)
-2. Run `npm run setup` after installing new native dependencies
+## Notes & limites
 
-## Notes for AI Agents
-
-- **Fast setup**: Use `bun install` then `npm run dev`
-- **Stable setup**: Use `npm install` then `npm run dev`
-- Use `npm run doctor` to diagnose issues
-- Use `npm run setup` instead of `npm run install` for Expo packages
-- The project uses Expo Router for navigation
-- Web version runs on port 3000 by default
-- Bun is 2-10x faster than npm for package installation 
+- Les **modèles de vidéo IA ne savent pas écrire de texte lisible** : tout texte « dans » un clip (marque, CTA) ressort déformé. Utiliser l'**incrustation** du montage pour afficher un texte net, ou des **captures d'écran** (image-to-video) pour montrer la vraie interface.
+- La génération **vidéo est payante** (fal.ai) : surveiller le solde du compte fal.
+- Sécurité : l'app fonctionne en mono-utilisateur démo (RLS Supabase permissif). À durcir si une vraie authentification est ajoutée.
