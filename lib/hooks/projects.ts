@@ -225,6 +225,32 @@ export function useSetSceneScreenshot() {
   });
 }
 
+/** Manually edit a scene's cinematic prompt (preserving any attached screenshot). */
+export function useUpdateScenePrompt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { sceneId: string; projectId: string; prompt: string }) => {
+      await db.videoScenes.update(input.sceneId, { prompt: input.prompt });
+    },
+    onSettled: (_, __, variables) => {
+      qc.invalidateQueries({ queryKey: ['video_scenes', variables.projectId] });
+    },
+  });
+}
+
+/** Manually edit the project's voiceover text (used for the TTS voice-over). */
+export function useUpdateProjectVoiceover() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { projectId: string; campaignId: string; voiceover: string }) => {
+      await db.videoProjects.update(input.projectId, { voiceoverFull: input.voiceover });
+    },
+    onSettled: (_, __, variables) => {
+      qc.invalidateQueries({ queryKey: ['video_projects', variables.campaignId] });
+    },
+  });
+}
+
 export function useDeleteVideoProject() {
   const qc = useQueryClient();
   return useMutation({

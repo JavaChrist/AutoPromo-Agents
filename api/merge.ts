@@ -1,10 +1,79 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { promises as fs } from 'node:fs';
+import { promises as fs, existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { put } from '@vercel/blob';
 import ffmpegPath from 'ffmpeg-static';
+
+interface Overlays {
+  title?: string;
+  cta?: string;
+  url?: string;
+}
+
+/** Locates a bundled TTF font for ffmpeg drawtext (best-effort). */
+function findFontFile(): string | null {
+  const rel = 'node_modules/@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf';
+  const candidates = [path.join(process.cwd(), rel), path.join('/var/task', rel)];
+  for (const c of candidates) {
+    try {
+      if (existsSync(c)) return c;
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
+}
+
+/**
+ * Builds an ffmpeg `-vf` drawtext chain that burns the title (top, whole video),
+ * CTA and URL (bottom, last seconds) onto the video. Text is written to files to
+ * avoid escaping issues with accents/apostrophes. Returns null if nothing to draw.
+ */
+async function buildOverlayFilter(
+  work: string,
+  overlays: Overlays | undefined,
+  totalDuration: number | undefined
+): Promise<string | null> {
+  if (!overlays) return null;
+  const font = findFontFile();
+  if (!font) return null;
+
+  const fontPath = font.replace(/\\/g, '/');
+  const parts: string[] = [];
+  const writeText = async (name: string, text: string): Promise<string> => {
+    const f = path.join(work, name);
+    await fs.writeFile(f, text, 'utf8');
+    return f.replace(/\\/g, '/');
+  };
+
+  // CTA/URL only appear during the last ~4s when we know the total duration.
+  const ctaStart =
+    typeof totalDuration === 'number' && totalDuration > 6 ? Math.max(0, Math.round(totalDuration - 4)) : null;
+  const enable = ctaStart != null ? `:enable=gte(t\\,${ctaStart})` : '';
+
+  if (overlays.title?.trim()) {
+    const tf = await writeText('ov_title.txt', overlays.title.trim());
+    parts.push(
+      `drawtext=fontfile='${fontPath}':textfile='${tf}':fontcolor=white:fontsize=h/18:box=1:boxcolor=black@0.45:boxborderw=16:x=(w-text_w)/2:y=h*0.06`
+    );
+  }
+  if (overlays.cta?.trim()) {
+    const tf = await writeText('ov_cta.txt', overlays.cta.trim());
+    parts.push(
+      `drawtext=fontfile='${fontPath}':textfile='${tf}':fontcolor=white:fontsize=h/13:box=1:boxcolor=black@0.55:boxborderw=22:x=(w-text_w)/2:y=h*0.72${enable}`
+    );
+  }
+  if (overlays.url?.trim()) {
+    const tf = await writeText('ov_url.txt', overlays.url.trim());
+    parts.push(
+      `drawtext=fontfile='${fontPath}':textfile='${tf}':fontcolor=white:fontsize=h/24:box=1:boxcolor=black@0.5:boxborderw=12:x=(w-text_w)/2:y=h*0.84${enable}`
+    );
+  }
+
+  return parts.length ? parts.join(',') : null;
+}
 
 /**
  * POST /api/merge
@@ -48,6 +117,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const urls: string[] = Array.isArray(body.urls) ? body.urls : [];
   const fileName: string = typeof body.fileName === 'string' ? body.fileName : 'video';
   const audioUrl: string | undefined = typeof body.audioUrl === 'string' ? body.audioUrl : undefined;
+  const overlays: Overlays | undefined =
+    body.overlays && typeof body.overlays === 'object' ? body.overlays : undefined;
+  const totalDuration: number | undefined =
+    typeof body.totalDuration === 'number' ? body.totalDuration : undefined;
 
   if (urls.length < 2) {
     res.status(400).json({ error: 'Fournis au moins 2 scènes à assembler.' });
@@ -100,16 +173,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       ]);
     }
 
+    // Optional text overlays (brand/title + CTA + URL) burned onto the video.
+    // Best-effort: if the font is missing or ffmpeg fails, keep the plain merge.
+    let videoFile = out;
+    const overlayFilter = await buildOverlayFilter(work, overlays, totalDuration);
+    if (overlayFilter) {
+      const outOverlaid = path.join(work, 'overlaid.mp4');
+      try {
+        await runFfmpeg(ffmpegPath, [
+          '-y', '-i', out, '-vf', overlayFilter,
+          '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22',
+          '-c:a', 'copy', '-movflags', '+faststart', outOverlaid,
+        ]);
+        videoFile = outOverlaid;
+      } catch {
+        // Overlay failed (e.g. font/codec issue) → fall back to the plain merge.
+        videoFile = out;
+      }
+    }
+
     // Optional voiceover: mix it over the merged video's audio (background
     // lowered to 25%), or use it as the only track if the video is silent.
-    let finalFile = out;
+    let finalFile = videoFile;
     if (audioUrl) {
       const voiceFile = path.join(work, 'voice.mp3');
       await downloadTo(audioUrl, voiceFile);
       const outVoice = path.join(work, 'final_voice.mp4');
       try {
         await runFfmpeg(ffmpegPath, [
-          '-y', '-i', out, '-i', voiceFile,
+          '-y', '-i', videoFile, '-i', voiceFile,
           '-filter_complex',
           '[0:a]volume=0.25[bg];[1:a]apad[vo];[bg][vo]amix=inputs=2:duration=first:dropout_transition=0[a]',
           '-map', '0:v', '-map', '[a]',
@@ -119,7 +211,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       } catch {
         // The merged video probably has no audio track → voiceover becomes the only track.
         await runFfmpeg(ffmpegPath, [
-          '-y', '-i', out, '-i', voiceFile,
+          '-y', '-i', videoFile, '-i', voiceFile,
           '-filter_complex', '[1:a]apad[a]',
           '-map', '0:v', '-map', '[a]',
           '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k',

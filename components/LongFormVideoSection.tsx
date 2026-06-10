@@ -12,6 +12,8 @@ import {
   Spinner,
   BlinkSelect,
   Label,
+  Input,
+  TextArea,
   toast,
   Sparkles,
   Trash2,
@@ -20,6 +22,7 @@ import {
   Play,
   RefreshCw,
   ImagePlus,
+  Check,
   X,
 } from '@/components/ui';
 import { VideoClipPlayer } from './VideoClipPlayer';
@@ -31,9 +34,12 @@ import {
   useGenerateScene,
   useDeleteVideoProject,
   useSetSceneScreenshot,
+  useUpdateScenePrompt,
+  useUpdateProjectVoiceover,
 } from '@/lib/hooks';
 import {
   extractSceneScreenshot,
+  setSceneScreenshot,
   generateVoiceover,
   VOICEOVER_VOICES,
   type VoiceoverVoice,
@@ -213,12 +219,34 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
   const anyGenerating = scenes.some((s: VideoScene) => s.status === 'generating') || generateAllMut.isPending;
   const failedScenes = scenes.filter((s: VideoScene) => s.status === 'failed');
 
+  const updateVoiceoverMut = useUpdateProjectVoiceover();
+
   const [merging, setMerging] = useState(false);
   const [mergeStep, setMergeStep] = useState<string | null>(null);
   const [mergedUrl, setMergedUrl] = useState<string | null>(null);
   const [voice, setVoice] = useState<string>('none');
 
-  const voiceoverText = (project.voiceover_full || '').trim();
+  // Editable voiceover text (persisted to the project on save).
+  const [voiceoverDraft, setVoiceoverDraft] = useState<string>(project.voiceover_full || '');
+  const voiceoverText = voiceoverDraft.trim();
+
+  // Optional on-screen text overlays burned into the final video.
+  const [overlayTitle, setOverlayTitle] = useState<string>('');
+  const [overlayCta, setOverlayCta] = useState<string>('');
+  const [overlayUrl, setOverlayUrl] = useState<string>('');
+
+  async function handleSaveVoiceover() {
+    try {
+      await updateVoiceoverMut.mutateAsync({
+        projectId: project.id,
+        campaignId: project.campaign_id,
+        voiceover: voiceoverDraft,
+      });
+      toast('Voix off enregistrée', { message: 'Le texte de la voix off a été mis à jour.', variant: 'success' });
+    } catch (err: any) {
+      toast('Erreur', { message: describeGenerationError(err), variant: 'error' });
+    }
+  }
 
   async function handleMerge() {
     const urls = [...readyScenes]
@@ -238,9 +266,19 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
         audioUrl = await generateVoiceover(voiceoverText, voice as VoiceoverVoice);
       }
 
-      // 2. Assemblage + mixage côté serveur
+      // 2. Assemblage + mixage + incrustations côté serveur
       setMergeStep(audioUrl ? '🎬 Assemblage + mixage de la voix…' : '🎬 Assemblage des scènes…');
-      const { url } = await mergeScenes(urls, project.title, { audioUrl });
+      const overlays = {
+        title: overlayTitle.trim() || undefined,
+        cta: overlayCta.trim() || undefined,
+        url: overlayUrl.trim() || undefined,
+      };
+      const hasOverlays = !!(overlays.title || overlays.cta || overlays.url);
+      const { url } = await mergeScenes(urls, project.title, {
+        audioUrl,
+        overlays: hasOverlays ? overlays : undefined,
+        totalDuration: project.target_duration,
+      });
       setMergedUrl(url);
       toast('Vidéo assemblée !', {
         message: audioUrl ? 'Montage complet avec voix off prêt.' : 'Ton montage complet est prêt.',
@@ -385,7 +423,7 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
             borderWidth={1}
             borderColor="$accent6"
           >
-            {/* Voix off optionnelle (texte du script → TTS, mixée au montage) */}
+            {/* Voix off optionnelle (texte éditable → TTS, mixée au montage) */}
             <YStack gap="$2">
               <Label color="$color12" fontWeight="600">🎙️ Voix off</Label>
               <BlinkSelect
@@ -397,16 +435,65 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
                 onValueChange={setVoice}
                 placeholder="Voix off"
               />
-              {voice !== 'none' && !voiceoverText ? (
-                <SizableText size="$1" color="$red10">
-                  Aucun texte de voix off dans ce projet — régénère le script d'abord
-                  (onglet Script), puis recrée le projet.
-                </SizableText>
-              ) : voice !== 'none' ? (
-                <SizableText size="$1" color="$color10" numberOfLines={3}>
-                  Texte lu : « {voiceoverText} »
-                </SizableText>
+              {voice !== 'none' ? (
+                <YStack gap="$2">
+                  <SizableText size="$1" color="$color10">
+                    Texte lu par la voix off (modifiable) :
+                  </SizableText>
+                  <TextArea
+                    value={voiceoverDraft}
+                    onChangeText={setVoiceoverDraft}
+                    placeholder="Saisis ou colle ici le texte que la voix off doit lire (en français)…"
+                    minHeight={90}
+                    size="$3"
+                    backgroundColor="$color1"
+                    color="$color12"
+                  />
+                  <XStack gap="$2" alignItems="center">
+                    <Button
+                      size="$2"
+                      icon={updateVoiceoverMut.isPending ? <Spinner size="small" /> : <Check size={14} />}
+                      disabled={updateVoiceoverMut.isPending}
+                      onPress={handleSaveVoiceover}
+                    >
+                      Enregistrer le texte
+                    </Button>
+                    {!voiceoverText ? (
+                      <SizableText size="$1" color="$red10" flex={1}>
+                        Texte vide — saisis-le pour générer la voix off.
+                      </SizableText>
+                    ) : null}
+                  </XStack>
+                </YStack>
               ) : null}
+            </YStack>
+
+            {/* Incrustation de texte (brûlée dans la vidéo via ffmpeg) */}
+            <YStack gap="$2">
+              <Label color="$color12" fontWeight="600">🅰️ Texte à incruster (optionnel)</Label>
+              <SizableText size="$1" color="$color10">
+                Affiché par-dessus la vidéo (les modèles IA ne savent pas écrire de texte lisible).
+                Le titre reste en haut ; l'accroche et l'URL apparaissent en bas sur les dernières secondes.
+              </SizableText>
+              <Input
+                value={overlayTitle}
+                onChangeText={setOverlayTitle}
+                placeholder="Titre / marque (ex. RideCloud)"
+                size="$3"
+              />
+              <Input
+                value={overlayCta}
+                onChangeText={setOverlayCta}
+                placeholder="Accroche / CTA (ex. Téléchargez l'app)"
+                size="$3"
+              />
+              <Input
+                value={overlayUrl}
+                onChangeText={setOverlayUrl}
+                placeholder="URL (ex. ridecloud.app)"
+                size="$3"
+                autoCapitalize="none"
+              />
             </YStack>
 
             <Button
@@ -488,7 +575,25 @@ function SceneRow({
   isUploadingScreenshot: boolean;
 }) {
   const isBusy = scene.status === 'generating' || isRegenerating;
-  const { imageUrl: screenshotUrl } = extractSceneScreenshot(scene.prompt || '');
+  const { prompt: cleanPrompt, imageUrl: screenshotUrl } = extractSceneScreenshot(scene.prompt || '');
+
+  const updatePromptMut = useUpdateScenePrompt();
+  const [editing, setEditing] = useState(false);
+  const [promptDraft, setPromptDraft] = useState(cleanPrompt);
+
+  async function handleSavePrompt() {
+    try {
+      const full = setSceneScreenshot(promptDraft, screenshotUrl ?? null);
+      await updatePromptMut.mutateAsync({ sceneId: scene.id, projectId: scene.project_id, prompt: full });
+      setEditing(false);
+      toast('Prompt enregistré', {
+        message: `Scène #${scene.scene_index} mise à jour. Régénère-la pour appliquer.`,
+        variant: 'success',
+      });
+    } catch (err: any) {
+      toast('Erreur', { message: describeGenerationError(err), variant: 'error' });
+    }
+  }
 
   return (
     <YStack
@@ -533,6 +638,51 @@ function SceneRow({
           />
         ) : null}
       </XStack>
+
+      {/* Édition manuelle du prompt de la scène */}
+      {editing ? (
+        <YStack gap="$2">
+          <TextArea
+            value={promptDraft}
+            onChangeText={setPromptDraft}
+            placeholder="Décris la scène (prompt cinématique, en anglais de préférence pour de meilleurs rendus)…"
+            minHeight={110}
+            size="$3"
+            backgroundColor="$color1"
+            color="$color12"
+          />
+          <XStack gap="$2">
+            <Button
+              size="$2"
+              icon={updatePromptMut.isPending ? <Spinner size="small" /> : <Check size={14} />}
+              disabled={updatePromptMut.isPending}
+              onPress={handleSavePrompt}
+            >
+              Enregistrer
+            </Button>
+            <Button
+              size="$2"
+              chromeless
+              disabled={updatePromptMut.isPending}
+              onPress={() => {
+                setPromptDraft(cleanPrompt);
+                setEditing(false);
+              }}
+            >
+              Annuler
+            </Button>
+          </XStack>
+        </YStack>
+      ) : (
+        <XStack alignItems="center" justifyContent="space-between" gap="$2">
+          <SizableText size="$1" color="$color10" flex={1} numberOfLines={2}>
+            {cleanPrompt || 'Aucun prompt — clique sur Modifier pour en écrire un.'}
+          </SizableText>
+          <Button size="$2" chromeless disabled={isBusy} onPress={() => setEditing(true)}>
+            ✏️ Modifier
+          </Button>
+        </XStack>
+      )}
 
       {/* Capture d'écran attachée à la scène (image-to-video) */}
       {screenshotUrl ? (

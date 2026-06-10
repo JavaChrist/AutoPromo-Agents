@@ -3,6 +3,15 @@ export interface MergeResult {
   size: number;
 }
 
+export interface MergeOverlays {
+  /** Brand / title shown at the top for the whole video. */
+  title?: string;
+  /** Call-to-action shown large near the bottom during the last seconds. */
+  cta?: string;
+  /** URL shown below the CTA during the last seconds. */
+  url?: string;
+}
+
 /**
  * Calls the serverless merge endpoint to concatenate ordered scene clips into a
  * single MP4. Only works on the deployed site (Vercel) or under `vercel dev` —
@@ -11,12 +20,18 @@ export interface MergeResult {
 export async function mergeScenes(
   urls: string[],
   fileName?: string,
-  options?: { audioUrl?: string }
+  options?: { audioUrl?: string; overlays?: MergeOverlays; totalDuration?: number }
 ): Promise<MergeResult> {
   const res = await fetch('/api/merge', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ urls, fileName, audioUrl: options?.audioUrl }),
+    body: JSON.stringify({
+      urls,
+      fileName,
+      audioUrl: options?.audioUrl,
+      overlays: options?.overlays,
+      totalDuration: options?.totalDuration,
+    }),
   });
 
   const text = await res.text();
