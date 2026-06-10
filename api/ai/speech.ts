@@ -81,7 +81,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const buffer = Buffer.from(arrayBuffer);
 
     const name = `voiceovers/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp3`;
-    const blob = await put(name, buffer, { access: 'public', contentType: 'audio/mpeg' });
+    const blob = await put(name, buffer, {
+      access: 'public',
+      contentType: 'audio/mpeg',
+      addRandomSuffix: true,
+    });
 
     res.status(200).json({ url: blob.url });
   } catch (err: any) {

@@ -278,6 +278,7 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
         audioUrl,
         overlays: hasOverlays ? overlays : undefined,
         totalDuration: project.target_duration,
+        aspectRatio: project.aspect_ratio,
       });
       setMergedUrl(url);
       if (hasOverlays && overlayWarning) {

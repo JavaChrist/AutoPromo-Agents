@@ -71,6 +71,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const blob = await put(name, buffer, {
       access: 'public',
       contentType: ALLOWED_EXT[ext],
+      addRandomSuffix: true,
     });
 
     res.status(200).json({ url: blob.url });

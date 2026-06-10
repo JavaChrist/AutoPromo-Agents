@@ -22,7 +22,7 @@ export interface MergeOverlays {
 export async function mergeScenes(
   urls: string[],
   fileName?: string,
-  options?: { audioUrl?: string; overlays?: MergeOverlays; totalDuration?: number }
+  options?: { audioUrl?: string; overlays?: MergeOverlays; totalDuration?: number; aspectRatio?: string }
 ): Promise<MergeResult> {
   const res = await fetch('/api/merge', {
     method: 'POST',
@@ -33,6 +33,7 @@ export async function mergeScenes(
       audioUrl: options?.audioUrl,
       overlays: options?.overlays,
       totalDuration: options?.totalDuration,
+      aspectRatio: options?.aspectRatio,
     }),
   });
 

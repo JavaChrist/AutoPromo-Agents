@@ -5,6 +5,8 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { put } from '@vercel/blob';
 import ffmpegPath from 'ffmpeg-static';
+import satori from 'satori';
+import { Resvg } from '@resvg/resvg-js';
 
 interface Overlays {
   title?: string;
@@ -12,7 +14,7 @@ interface Overlays {
   url?: string;
 }
 
-/** Locates a bundled TTF font for ffmpeg drawtext (best-effort). */
+/** Locates a bundled TTF font (best-effort). */
 function findFontFile(): string | null {
   const candidates: string[] = [];
   // require.resolve also signals the Vercel bundler (nft) to include the asset.
@@ -38,54 +40,135 @@ function findFontFile(): string | null {
   return null;
 }
 
+/** Target render resolution for the overlay PNGs, by aspect ratio. */
+function overlayDims(aspect?: string): { W: number; H: number } {
+  if (aspect === '16:9') return { W: 1280, H: 720 };
+  if (aspect === '1:1') return { W: 1080, H: 1080 };
+  return { W: 720, H: 1280 }; // 9:16 default
+}
+
+/** A rounded, semi-transparent text "chip" (Satori VDOM node). */
+function chip(text: string, fontSize: number, maxWidth: number, bgOpacity = 0.5, marginTop = 0): any {
+  return {
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        backgroundColor: `rgba(0,0,0,${bgOpacity})`,
+        color: 'white',
+        fontSize,
+        fontWeight: 700,
+        paddingTop: Math.round(fontSize * 0.3),
+        paddingBottom: Math.round(fontSize * 0.3),
+        paddingLeft: Math.round(fontSize * 0.7),
+        paddingRight: Math.round(fontSize * 0.7),
+        borderRadius: 16,
+        maxWidth,
+        marginTop,
+        textAlign: 'center',
+      },
+      children: text,
+    },
+  };
+}
+
+/** Renders a Satori VDOM tree to a full-frame transparent PNG file. */
+async function renderPng(element: any, W: number, H: number, fontData: Buffer, outFile: string): Promise<void> {
+  const svg = await satori(element, {
+    width: W,
+    height: H,
+    fonts: [{ name: 'Inter', data: fontData, weight: 700, style: 'normal' }],
+  });
+  const png = new Resvg(svg, { fitTo: { mode: 'width', value: W } }).render().asPng();
+  await fs.writeFile(outFile, png);
+}
+
+function topElement(title: string, W: number, H: number): any {
+  return {
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        width: '100%',
+        height: '100%',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'flex-start',
+        paddingTop: Math.round(H * 0.05),
+      },
+      children: chip(title, Math.round(H / 16), Math.round(W * 0.9), 0.5),
+    },
+  };
+}
+
+function bottomElement(cta: string | undefined, url: string | undefined, W: number, H: number): any {
+  const children: any[] = [];
+  if (cta) children.push(chip(cta, Math.round(H / 14), Math.round(W * 0.9), 0.55));
+  if (url) children.push(chip(url, Math.round(H / 26), Math.round(W * 0.9), 0.5, children.length ? Math.round(H * 0.015) : 0));
+  return {
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        width: '100%',
+        height: '100%',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        paddingBottom: Math.round(H * 0.08),
+      },
+      children,
+    },
+  };
+}
+
 /**
- * Builds an ffmpeg `-vf` drawtext chain that burns the title (top, whole video),
- * CTA and URL (bottom, last seconds) onto the video. Text is written to files to
- * avoid escaping issues with accents/apostrophes. Returns null if nothing to draw.
+ * Burns the title (top, whole video) + CTA/URL (bottom, last seconds) by
+ * compositing pre-rendered PNGs with ffmpeg's core `overlay` filter (the Linux
+ * ffmpeg-static build has no `drawtext`/libfreetype, so text is rasterized with
+ * Satori instead). Returns the ffmpeg args, or a reason when skipped.
  */
-async function buildOverlayFilter(
+async function buildOverlay(
   work: string,
   overlays: Overlays | undefined,
-  totalDuration: number | undefined
-): Promise<{ filter: string | null; reason?: string }> {
+  totalDuration: number | undefined,
+  aspectRatio: string | undefined
+): Promise<{ inputs: string[]; filterComplex: string; mapLabel: string } | { reason: string } | null> {
   const requested = !!(overlays && (overlays.title?.trim() || overlays.cta?.trim() || overlays.url?.trim()));
-  if (!overlays || !requested) return { filter: null };
+  if (!overlays || !requested) return null;
+
   const font = findFontFile();
-  if (!font) return { filter: null, reason: 'police introuvable côté serveur' };
+  if (!font) return { reason: 'police introuvable côté serveur' };
+  const fontData = await fs.readFile(font);
 
-  const fontPath = font.replace(/\\/g, '/');
-  const parts: string[] = [];
-  const writeText = async (name: string, text: string): Promise<string> => {
-    const f = path.join(work, name);
-    await fs.writeFile(f, text, 'utf8');
-    return f.replace(/\\/g, '/');
-  };
-
-  // CTA/URL only appear during the last ~4s when we know the total duration.
+  const { W, H } = overlayDims(aspectRatio);
   const ctaStart =
-    typeof totalDuration === 'number' && totalDuration > 6 ? Math.max(0, Math.round(totalDuration - 4)) : null;
-  const enable = ctaStart != null ? `:enable=gte(t\\,${ctaStart})` : '';
+    typeof totalDuration === 'number' && totalDuration > 6 ? Math.max(0, Math.round(totalDuration - 4)) : 0;
+
+  const inputs: string[] = [];
+  const fc: string[] = [`[0:v]scale=${W}:${H},setsar=1[v0]`];
+  let cur = 'v0';
+  let idx = 1;
 
   if (overlays.title?.trim()) {
-    const tf = await writeText('ov_title.txt', overlays.title.trim());
-    parts.push(
-      `drawtext=fontfile='${fontPath}':textfile='${tf}':fontcolor=white:fontsize=h/18:box=1:boxcolor=black@0.45:boxborderw=16:x=(w-text_w)/2:y=h*0.06`
-    );
+    const p = path.join(work, 'ov_top.png');
+    await renderPng(topElement(overlays.title.trim(), W, H), W, H, fontData, p);
+    inputs.push('-i', p);
+    fc.push(`[${cur}][${idx}:v]overlay=0:0[v${idx}]`);
+    cur = `v${idx}`;
+    idx++;
   }
-  if (overlays.cta?.trim()) {
-    const tf = await writeText('ov_cta.txt', overlays.cta.trim());
-    parts.push(
-      `drawtext=fontfile='${fontPath}':textfile='${tf}':fontcolor=white:fontsize=h/13:box=1:boxcolor=black@0.55:boxborderw=22:x=(w-text_w)/2:y=h*0.72${enable}`
-    );
-  }
-  if (overlays.url?.trim()) {
-    const tf = await writeText('ov_url.txt', overlays.url.trim());
-    parts.push(
-      `drawtext=fontfile='${fontPath}':textfile='${tf}':fontcolor=white:fontsize=h/24:box=1:boxcolor=black@0.5:boxborderw=12:x=(w-text_w)/2:y=h*0.84${enable}`
-    );
+  if (overlays.cta?.trim() || overlays.url?.trim()) {
+    const p = path.join(work, 'ov_bottom.png');
+    await renderPng(bottomElement(overlays.cta?.trim(), overlays.url?.trim(), W, H), W, H, fontData, p);
+    inputs.push('-i', p);
+    const en = ctaStart > 0 ? `:enable='gte(t,${ctaStart})'` : '';
+    fc.push(`[${cur}][${idx}:v]overlay=0:0${en}[v${idx}]`);
+    cur = `v${idx}`;
+    idx++;
   }
 
-  return { filter: parts.length ? parts.join(',') : null };
+  return { inputs, filterComplex: fc.join(';'), mapLabel: cur };
 }
 
 /**
@@ -134,6 +217,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     body.overlays && typeof body.overlays === 'object' ? body.overlays : undefined;
   const totalDuration: number | undefined =
     typeof body.totalDuration === 'number' ? body.totalDuration : undefined;
+  const aspectRatio: string | undefined =
+    typeof body.aspectRatio === 'string' ? body.aspectRatio : undefined;
 
   if (urls.length < 2) {
     res.status(400).json({ error: 'Fournis au moins 2 scènes à assembler.' });
@@ -192,31 +277,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     let videoFile = out;
     let overlayApplied = false;
     let overlayWarning: string | undefined;
-    const { filter: overlayFilter, reason: overlayReason } = await buildOverlayFilter(
-      work,
-      overlays,
-      totalDuration
-    );
-    if (overlayReason) {
-      overlayWarning = `Incrustation ignorée : ${overlayReason}.`;
-      console.error('[merge] overlay skipped', { reason: overlayReason });
-    }
-    if (overlayFilter) {
-      const outOverlaid = path.join(work, 'overlaid.mp4');
-      try {
+    try {
+      const overlay = await buildOverlay(work, overlays, totalDuration, aspectRatio);
+      if (overlay && 'reason' in overlay) {
+        overlayWarning = `Incrustation ignorée : ${overlay.reason}.`;
+        console.error('[merge] overlay skipped', { reason: overlay.reason });
+      } else if (overlay) {
+        const outOverlaid = path.join(work, 'overlaid.mp4');
         await runFfmpeg(ffmpegPath, [
-          '-y', '-i', out, '-vf', overlayFilter,
+          '-y', '-i', out, ...overlay.inputs,
+          '-filter_complex', overlay.filterComplex,
+          '-map', `[${overlay.mapLabel}]`, '-map', '0:a?',
           '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22',
           '-c:a', 'copy', '-movflags', '+faststart', outOverlaid,
         ]);
         videoFile = outOverlaid;
         overlayApplied = true;
-      } catch (e: any) {
-        // Overlay failed (e.g. codec issue) → fall back to the plain merge.
-        overlayWarning = `Incrustation échouée : ${String(e?.message || e).slice(-300)}`;
-        console.error('[merge] overlay ffmpeg error', { message: String(e?.message || e) });
-        videoFile = out;
       }
+    } catch (e: any) {
+      overlayWarning = `Incrustation échouée : ${String(e?.message || e).slice(-300)}`;
+      console.error('[merge] overlay error', { message: String(e?.message || e) });
+      videoFile = out;
     }
 
     // Optional voiceover: mix it over the merged video's audio (background
@@ -253,6 +334,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const blob = await put(`merged/${safeName}-${Date.now()}.mp4`, data, {
       access: 'public',
       contentType: 'video/mp4',
+      addRandomSuffix: true,
     });
 
     res.status(200).json({ url: blob.url, size: data.length, overlayApplied, overlayWarning });
