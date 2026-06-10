@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { DEMO_USER_ID, getErrorMessage } from '../blink';
+import { DEMO_USER_ID } from '../constants';
+import { getErrorMessage } from '../errors';
 import { db } from '../db';
 import { normalizeCampaign } from '../normalizers';
 import type { Campaign, Platform } from '../types';

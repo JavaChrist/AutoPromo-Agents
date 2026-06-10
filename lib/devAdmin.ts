@@ -10,7 +10,7 @@
  * mirrors useDeleteCampaign. This file has no effect in production builds.
  */
 import { db } from './db';
-import { DEMO_USER_ID } from './blink';
+import { DEMO_USER_ID } from './constants';
 
 function campaignName(c: any): string {
   return String(c?.productName ?? c?.product_name ?? '').trim();

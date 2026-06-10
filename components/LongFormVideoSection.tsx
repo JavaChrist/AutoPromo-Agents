@@ -21,7 +21,7 @@ import {
   RefreshCw,
   ImagePlus,
   X,
-} from '@blinkdotnew/mobile-ui';
+} from '@/components/ui';
 import { VideoClipPlayer } from './VideoClipPlayer';
 import {
   useVideoProjects,
@@ -48,7 +48,7 @@ import {
   type VideoProject,
   type VideoScene,
 } from '@/lib/types';
-import { describeGenerationError } from '@/lib/blink';
+import { describeGenerationError } from '@/lib/errors';
 import { mergeScenes } from '@/lib/mergeVideo';
 
 interface Props {

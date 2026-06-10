@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getErrorMessage } from '../blink';
+import { getErrorMessage } from '../errors';
 import { db } from '../db';
 import { normalizeWave, normalizeWavePost } from '../normalizers';
 import type { Campaign, CampaignWave, Platform } from '../types';

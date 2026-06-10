@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { Card, YStack, XStack, SizableText, Badge } from '@blinkdotnew/mobile-ui';
+import { Card, YStack, XStack, SizableText, Badge } from '@/components/ui';
 
 interface Props {
   id: string;

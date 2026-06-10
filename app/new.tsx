@@ -14,10 +14,11 @@ import {
   AppHeader,
   toast,
   Sparkles,
-} from '@blinkdotnew/mobile-ui';
+} from '@/components/ui';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCreateCampaign, useGenerateContent } from '@/lib/hooks';
-import { blink, DEMO_USER_ID, describeGenerationError } from '@/lib/blink';
+import { DEMO_USER_ID } from '@/lib/constants';
+import { describeGenerationError } from '@/lib/errors';
 import type { Campaign } from '@/lib/types';
 
 const TONES = [
@@ -79,14 +80,6 @@ export default function NewCampaign() {
         router.replace(`/campaign/${id}`);
       }
     } catch (err: any) {
-      const isAuthError =
-        err?.details?.originalError?.name === 'BlinkAuthError' ||
-        err?.message?.includes('401') ||
-        err?.message?.includes('Unauthorized');
-      if (isAuthError) {
-        await blink.auth.login();
-        return;
-      }
       toast('Erreur', { message: err?.message || 'Impossible de créer la campagne.', variant: 'error' });
     } finally {
       setBusy(false);

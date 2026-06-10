@@ -13,7 +13,7 @@ import {
   Sparkles,
   Zap,
   Megaphone,
-} from '@blinkdotnew/mobile-ui';
+} from '@/components/ui';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCampaigns } from '@/lib/hooks';
 import { CampaignCard } from '@/components/CampaignCard';

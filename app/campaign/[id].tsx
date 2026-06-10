@@ -27,7 +27,7 @@ import {
   RefreshCw,
   Check,
   AlertCircle,
-} from '@blinkdotnew/mobile-ui';
+} from '@/components/ui';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   useCampaign,
@@ -38,7 +38,7 @@ import {
   useStuckGenerationGuard,
 } from '@/lib/hooks';
 import { PLATFORM_META, type Platform, type SocialPost } from '@/lib/types';
-import { describeGenerationError } from '@/lib/blink';
+import { describeGenerationError } from '@/lib/errors';
 import { useGenerationStore, type AgentStepKey, type AgentStepState } from '@/lib/stores/generation';
 import { AIClipsSection } from '@/components/AIClipsSection';
 import { LongFormVideoSection } from '@/components/LongFormVideoSection';

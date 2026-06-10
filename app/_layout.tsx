@@ -4,7 +4,8 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Platform } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { BlinkProvider, createTamagui, tamaguiDefaultConfig, Theme, BlinkToastProvider } from '@blinkdotnew/mobile-ui';
+import { BlinkProvider, Theme, BlinkToastProvider } from '@/components/ui';
+import { tamaguiConfig } from '@/tamagui.config';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 
 const queryClient = new QueryClient({
@@ -16,7 +17,7 @@ const queryClient = new QueryClient({
   },
 });
 
-const config = createTamagui({ ...tamaguiDefaultConfig });
+const config = tamaguiConfig;
 
 function WebStyleReset() {
   if (Platform.OS !== 'web') return null;

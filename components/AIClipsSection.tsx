@@ -21,10 +21,10 @@ import {
   Check,
   ImagePlus,
   X,
-} from '@blinkdotnew/mobile-ui';
+} from '@/components/ui';
 import { VideoClipPlayer } from './VideoClipPlayer';
 import { useVideoClips, useGenerateVideoClip, useDeleteVideoClip } from '@/lib/hooks';
-import { describeGenerationError, isAuthError } from '@/lib/blink';
+import { describeGenerationError, isAuthError } from '@/lib/errors';
 import { pickAndUploadScreenshot } from '@/lib/screenshots';
 import { VIDEO_MODELS, ASPECT_RATIOS, MODEL_DURATIONS, type VideoModel, type Campaign, type VideoScript, type VideoClip } from '@/lib/types';
 
@@ -325,7 +325,7 @@ function GenerationProgress({ estimatedMs = 60000 }: { estimatedMs?: number }) {
       </XStack>
 
       <Progress value={progress} size="$2" backgroundColor="$color5">
-        <Progress.Indicator animation="bouncy" backgroundColor="#7C5CFF" />
+        <Progress.Indicator backgroundColor="#7C5CFF" />
       </Progress>
 
       <YStack gap="$1.5">

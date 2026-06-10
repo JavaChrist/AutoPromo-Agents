@@ -1,5 +1,4 @@
-import { blink } from './blink';
-import { ensureAuthForAI } from './auth';
+import { postJSON } from './api';
 import type { Campaign, Platform } from './types';
 
 interface ScriptResult {
@@ -15,6 +14,12 @@ interface PostResult {
   hashtags: string;
 }
 
+/** Structured text generation via the backend Gemini route. */
+async function generateObject<T>(prompt: string, schema: object): Promise<T> {
+  const { object } = await postJSON<{ object: T }>('/api/ai/text', { prompt, schema });
+  return object;
+}
+
 const TONE_INSTRUCTIONS: Record<string, string> = {
   professionnel: 'Ton professionnel, crédible, orienté valeur business.',
   convivial: 'Ton chaleureux, accessible, complice avec le lecteur.',
@@ -26,12 +31,10 @@ const TONE_INSTRUCTIONS: Record<string, string> = {
 // ─── Script vidéo ────────────────────────────────────────────────────────────
 
 export async function generateVideoScript(campaign: Campaign): Promise<ScriptResult> {
-  await ensureAuthForAI();
   const toneInstruction = TONE_INSTRUCTIONS[campaign.tone || 'professionnel'] || '';
 
-  const { object } = await blink.ai.generateObject({
-    model: 'google/gemini-3-flash',
-    prompt: `Tu es un expert en marketing vidéo pour applications PWA. Génère un script de vidéo de présentation de 30 secondes pour ce produit :
+  const object = await generateObject<ScriptResult>(
+    `Tu es un expert en marketing vidéo pour applications PWA. Génère un script de vidéo de présentation de 30 secondes pour ce produit :
 
 Produit : ${campaign.product_name}
 Pitch : ${campaign.pitch}
@@ -40,7 +43,7 @@ URL : ${campaign.product_url || 'n/a'}
 ${toneInstruction}
 
 Le script doit être en français, percutant dès la première seconde (règle des 3s), avec un CTA clair à la fin. Le storyboard décrit 4-5 plans avec timings précis.`,
-    schema: {
+    {
       type: 'object',
       properties: {
         hook: { type: 'string', description: "Phrase d'accroche des 3 premières secondes" },
@@ -50,10 +53,10 @@ Le script doit être en français, percutant dès la première seconde (règle d
         duration_sec: { type: 'number', description: 'Durée totale en secondes' },
       },
       required: ['hook', 'storyboard', 'voiceover', 'cta', 'duration_sec'],
-    },
-  });
+    }
+  );
 
-  return object as ScriptResult;
+  return object;
 }
 
 // ─── Posts sociaux ────────────────────────────────────────────────────────────
@@ -66,13 +69,11 @@ const PLATFORM_GUIDELINES: Record<Platform, string> = {
 };
 
 export async function generateSocialPost(campaign: Campaign, platform: Platform): Promise<PostResult> {
-  await ensureAuthForAI();
   const toneInstruction = TONE_INSTRUCTIONS[campaign.tone || 'professionnel'] || '';
   const guideline = PLATFORM_GUIDELINES[platform];
 
-  const { object } = await blink.ai.generateObject({
-    model: 'google/gemini-3-flash',
-    prompt: `Tu es un expert community manager. Génère un post de lancement en français pour ce produit, optimisé pour la plateforme.
+  const object = await generateObject<PostResult>(
+    `Tu es un expert community manager. Génère un post de lancement en français pour ce produit, optimisé pour la plateforme.
 
 Produit : ${campaign.product_name}
 Pitch : ${campaign.pitch}
@@ -84,20 +85,43 @@ Plateforme : ${platform.toUpperCase()}
 Directives : ${guideline}
 
 Contenu prêt à publier (pas de markdown, pas d'instructions). Les hashtags : string avec # devant chaque tag, séparés par des espaces.`,
-    schema: {
+    {
       type: 'object',
       properties: {
         content: { type: 'string', description: 'Texte complet du post prêt à publier' },
         hashtags: { type: 'string', description: 'Hashtags séparés par espace, ex: "#startup #saas #ia"' },
       },
       required: ['content', 'hashtags'],
-    },
-  });
+    }
+  );
 
-  return object as PostResult;
+  return object;
 }
 
 // ─── Clip vidéo IA ────────────────────────────────────────────────────────────
+
+/** Generate a video clip via the backend fal.ai route. */
+async function generateVideo(options: {
+  prompt: string;
+  model: string;
+  aspect_ratio: string;
+  duration: string;
+  image_url?: string;
+}): Promise<string> {
+  const input: Record<string, any> = {
+    prompt: options.prompt,
+    aspect_ratio: options.aspect_ratio,
+    // Kling expects bare seconds ("5"/"10"); other models accept "8s" etc.
+    duration: options.model.includes('kling') ? options.duration.replace(/s$/i, '') : options.duration,
+  };
+  if (options.image_url) input.image_url = options.image_url;
+
+  const { video_url } = await postJSON<{ video_url: string }>('/api/ai/video', {
+    model: options.model,
+    input,
+  });
+  return video_url;
+}
 
 /** Kling only accepts 5s or 10s — map any requested duration to the nearest. */
 function toKlingDuration(d: string): '5s' | '10s' {
@@ -145,7 +169,6 @@ export async function generateVideoFromScript(
   script: { hook?: string; storyboard?: string; voiceover?: string } | null,
   options: { model: string; aspect_ratio: string; duration: string; image_url?: string }
 ): Promise<{ video_url: string; prompt: string }> {
-  await ensureAuthForAI();
   const toneInstruction = TONE_INSTRUCTIONS[campaign.tone || 'professionnel'] || '';
   const fromScreenshot = !!options.image_url;
   let visualPrompt = '';
@@ -155,9 +178,8 @@ export async function generateVideoFromScript(
     : '';
 
   if (script?.storyboard) {
-    const { object } = await blink.ai.generateObject({
-      model: 'google/gemini-3-flash',
-      prompt: `You are an art director. Convert this French storyboard into ONE cinematic video prompt in English for an AI video model (Veo/Sora). The prompt must describe:
+    const object = await generateObject<{ prompt: string }>(
+      `You are an art director. Convert this French storyboard into ONE cinematic video prompt in English for an AI video model (Veo/Sora). The prompt must describe:
 - Main subject and their actions
 - Visual style (cinematic, modern, vibrant, etc.)
 - Lighting and mood
@@ -176,31 +198,29 @@ ${script.storyboard}
 Hook: ${script.hook || ''}
 
 Write ONE paragraph of 60-100 words in English, dense and visual, optimized for a ${options.duration} video clip. No narration text, only visual description.`,
-      schema: {
+      {
         type: 'object',
         properties: {
           prompt: { type: 'string', description: 'Cinematic English video generation prompt, 60-100 words' },
         },
         required: ['prompt'],
-      },
-    });
-    visualPrompt = (object as { prompt: string }).prompt;
+      }
+    );
+    visualPrompt = object.prompt;
   } else {
     visualPrompt = fromScreenshot
       ? `Cinematic promotional video starting from the provided real screenshot of the "${campaign.product_name}" app interface. Gentle camera push-in over the UI, interface elements subtly animating (smooth scrolls, taps, micro-interactions), modern professional lighting, then a tasteful zoom-out revealing the app on a smartphone in a real-life scene. ${campaign.pitch}. Clean, polished tech advertisement style.`
       : `Modern cinematic promotional video for "${campaign.product_name}": ${campaign.pitch}. Dynamic tracking shots, vibrant professional lighting, contemporary UI mockups on screens, energetic transitions. Target audience: ${campaign.target_audience || 'general public'}. Clean, polished tech advertisement style.`;
   }
 
-  const tryModel = async (model: string, duration: string) => {
-    const { result } = await blink.ai.generateVideo({
+  const tryModel = (model: string, duration: string) =>
+    generateVideo({
       prompt: visualPrompt,
       model,
-      aspect_ratio: options.aspect_ratio as '9:16' | '16:9' | '1:1',
-      duration: duration as any,
+      aspect_ratio: options.aspect_ratio,
+      duration,
       ...(options.image_url ? { image_url: options.image_url } : {}),
     });
-    return result.video.url;
-  };
 
   // With a screenshot, switch to the image-to-video variant of the chosen model.
   const primaryModel = fromScreenshot ? (I2V_VARIANTS[options.model] ?? options.model) : options.model;
@@ -241,12 +261,10 @@ export async function planVideoScenes(
   script: { hook?: string; storyboard?: string; voiceover?: string } | null,
   options: { numScenes: number; sceneDuration: string; totalDuration: number }
 ): Promise<ScenePlan[]> {
-  await ensureAuthForAI();
   const toneInstruction = TONE_INSTRUCTIONS[campaign.tone || 'professionnel'] || '';
 
-  const { object } = await blink.ai.generateObject({
-    model: 'google/gemini-3-flash',
-    prompt: `You are an expert video director. Break down a ${options.totalDuration}-second promotional video into EXACTLY ${options.numScenes} sequential scenes (each ${options.sceneDuration}).
+  const object = await generateObject<{ scenes: ScenePlan[] }>(
+    `You are an expert video director. Break down a ${options.totalDuration}-second promotional video into EXACTLY ${options.numScenes} sequential scenes (each ${options.sceneDuration}).
 
 Product: ${campaign.product_name}
 Pitch: ${campaign.pitch}
@@ -267,7 +285,7 @@ The ${options.numScenes} scenes must form a coherent narrative arc:
 - Last scene: CTA / brand reveal
 
 Each prompt must be self-contained (the AI generates each clip independently with no memory of others).`,
-    schema: {
+    {
       type: 'object',
       properties: {
         scenes: {
@@ -285,18 +303,16 @@ Each prompt must be self-contained (the AI generates each clip independently wit
         },
       },
       required: ['scenes'],
-    },
-  });
+    }
+  );
 
-  return (object as { scenes: ScenePlan[] }).scenes.slice(0, options.numScenes);
+  return object.scenes.slice(0, options.numScenes);
 }
 
 export async function generateSceneClip(
   rawPrompt: string,
   options: { model: string; aspect_ratio: string; duration: string }
 ): Promise<string> {
-  await ensureAuthForAI();
-
   // A screenshot may be embedded in the prompt → switch to image-to-video.
   const { prompt: basePrompt, imageUrl } = extractSceneScreenshot(rawPrompt);
   const prompt = imageUrl
@@ -306,16 +322,14 @@ export async function generateSceneClip(
   const primaryModel = imageUrl ? (I2V_VARIANTS[options.model] ?? options.model) : options.model;
   const fallbackModel = imageUrl ? KLING_I2V : KLING_T2V;
 
-  const tryModel = async (model: string, duration: string) => {
-    const { result } = await blink.ai.generateVideo({
+  const tryModel = (model: string, duration: string) =>
+    generateVideo({
       prompt,
       model,
-      aspect_ratio: options.aspect_ratio as '9:16' | '16:9' | '1:1',
-      duration: duration as any,
+      aspect_ratio: options.aspect_ratio,
+      duration,
       ...(imageUrl ? { image_url: imageUrl } : {}),
     });
-    return result.video.url;
-  };
 
   try {
     return await tryModel(primaryModel, options.duration);
@@ -354,12 +368,7 @@ export async function generateVoiceover(
   text: string,
   voice: VoiceoverVoice = 'nova'
 ): Promise<string> {
-  await ensureAuthForAI();
-  const { url } = await blink.ai.generateSpeech({
-    text,
-    voice,
-    response_format: 'mp3',
-  });
+  const { url } = await postJSON<{ url: string }>('/api/ai/speech', { text, voice });
   return url;
 }
 
@@ -378,12 +387,10 @@ export async function planCampaignWaves(
   campaign: Campaign,
   options: { numWaves: number; durationDays: number }
 ): Promise<WavePlan[]> {
-  await ensureAuthForAI();
   const toneInstruction = TONE_INSTRUCTIONS[campaign.tone || 'professionnel'] || '';
 
-  const { object } = await blink.ai.generateObject({
-    model: 'google/gemini-3-flash',
-    prompt: `Tu es un stratège marketing senior. Conçois un plan de campagne en ${options.numWaves} vagues sur ${options.durationDays} jours pour le lancement de ce produit.
+  const object = await generateObject<{ waves: WavePlan[] }>(
+    `Tu es un stratège marketing senior. Conçois un plan de campagne en ${options.numWaves} vagues sur ${options.durationDays} jours pour le lancement de ce produit.
 
 Produit : ${campaign.product_name}
 Pitch : ${campaign.pitch}
@@ -406,7 +413,7 @@ Pour chaque vague, produis :
 - day_offset : jour depuis le début (0 = jour de lancement, négatif = avant, positif = après)
 
 Le plan doit avoir un arc cohérent : teaser → launch → social_proof → feature(s) → retargeting/community.`,
-    schema: {
+    {
       type: 'object',
       properties: {
         waves: {
@@ -426,10 +433,10 @@ Le plan doit avoir un arc cohérent : teaser → launch → social_proof → fea
         },
       },
       required: ['waves'],
-    },
-  });
+    }
+  );
 
-  return (object as { waves: WavePlan[] }).waves.slice(0, options.numWaves);
+  return object.waves.slice(0, options.numWaves);
 }
 
 const WAVE_ANGLE: Record<string, string> = {
@@ -446,14 +453,12 @@ export async function generateWavePost(
   wave: { name: string; type: string; description: string; goal: string },
   platform: Platform
 ): Promise<PostResult> {
-  await ensureAuthForAI();
   const toneInstruction = TONE_INSTRUCTIONS[campaign.tone || 'professionnel'] || '';
   const guideline = PLATFORM_GUIDELINES[platform];
   const waveAngle = WAVE_ANGLE[wave.type] || '';
 
-  const { object } = await blink.ai.generateObject({
-    model: 'google/gemini-3-flash',
-    prompt: `Tu es un expert community manager. Génère UN post de campagne en français pour cette vague.
+  const object = await generateObject<PostResult>(
+    `Tu es un expert community manager. Génère UN post de campagne en français pour cette vague.
 
 PRODUIT
 Nom : ${campaign.product_name}
@@ -473,17 +478,17 @@ PLATEFORME : ${platform.toUpperCase()}
 Directives : ${guideline}
 
 Le post doit refléter l'angle de la vague (pas un post de lancement générique). Prêt à publier (pas de markdown).`,
-    schema: {
+    {
       type: 'object',
       properties: {
         content: { type: 'string', description: 'Texte complet du post' },
         hashtags: { type: 'string', description: 'Hashtags séparés par espace' },
       },
       required: ['content', 'hashtags'],
-    },
-  });
+    }
+  );
 
-  return object as PostResult;
+  return object;
 }
 
 // ─── Full campaign ────────────────────────────────────────────────────────────
@@ -492,9 +497,6 @@ export async function generateFullCampaign(
   campaign: Campaign,
   onStep?: (key: 'script' | Platform, state: 'done' | 'failed') => void
 ): Promise<{ script: ScriptResult; posts: Record<Platform, PostResult> }> {
-  // Auth once before parallel calls
-  await ensureAuthForAI();
-
   const platforms: Platform[] = ['instagram', 'x', 'facebook', 'linkedin'];
 
   // Each task reports its real completion so the UI can reflect per-agent state.

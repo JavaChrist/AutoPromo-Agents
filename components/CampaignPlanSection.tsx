@@ -19,7 +19,7 @@ import {
   Copy,
   Calendar,
   Target,
-} from '@blinkdotnew/mobile-ui';
+} from '@/components/ui';
 import {
   useCampaignWaves,
   useWavePosts,

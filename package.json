@@ -1,5 +1,5 @@
 {
-  "name": "blink-expo-starter",
+  "name": "autopromo-agents",
   "main": "expo-router/entry",
   "version": "1.0.0",
   "private": true,
@@ -24,11 +24,10 @@
     "prebuild:clean": "cross-env EXPO_NO_TELEMETRY=1 npx expo prebuild --clean"
   },
   "dependencies": {
-    "@blinkdotnew/mobile-ui": "2.0.0",
-    "@blinkdotnew/sdk": "^2.5.0",
     "@expo/vector-icons": "^15.0.3",
     "@legendapp/list": "^2.0.16",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@supabase/supabase-js": "^2.108.1",
     "@tamagui/config": "2.1.0",
     "@tamagui/core": "2.1.0",
     "@tamagui/lucide-icons": "^1.144.4",

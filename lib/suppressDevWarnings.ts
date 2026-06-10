@@ -1,12 +1,11 @@
 /**
  * Dev-only suppression of known, harmless React DOM warnings emitted by the
- * pre-compiled `@blinkdotnew/mobile-ui` (Tamagui) components on react-native-web.
+ * Tamagui components on react-native-web.
  *
- * These props (`zIndex`, `elevate`, `bordered`) are forwarded to the DOM by the
- * library's internal components, not by our own code, and React only warns about
+ * These props (`zIndex`, `elevate`, `bordered`) are forwarded to the DOM by
+ * Tamagui's internal components, not by our own code, and React only warns about
  * them in development. The matching below is intentionally narrow so that real
- * warnings are never hidden. Remove this file once the UI library stops leaking
- * these props.
+ * warnings are never hidden.
  */
 if (__DEV__ && typeof console !== 'undefined') {
   // React DOM warnings leaked by the pre-compiled Tamagui UI lib (not our code).
@@ -15,9 +14,8 @@ if (__DEV__ && typeof console !== 'undefined') {
     { needle: 'for a non-boolean attribute', props: ['elevate', 'bordered'] },
   ];
 
-  // Plain-substring messages that are benign in this app (e.g. the Blink headless
-  // auth notice — using the default auth server IS correct for our setup).
-  const IGNORED_MESSAGES = ['Using default authUrl'];
+  // Plain-substring messages that are benign in this app.
+  const IGNORED_MESSAGES: string[] = [];
 
   const matches = (args: unknown[]): boolean => {
     const format = typeof args[0] === 'string' ? args[0] : '';
