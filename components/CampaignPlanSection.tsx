@@ -4,7 +4,6 @@ import {
   YStack,
   XStack,
   Card,
-  H4,
   SizableText,
   Paragraph,
   Button,

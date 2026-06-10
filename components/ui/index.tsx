@@ -59,7 +59,31 @@ export {
 export { config as tamaguiDefaultConfig } from '@tamagui/config';
 
 // ─── Icons (lucide via Tamagui) ──────────────────────────────────────────────
-export * from '@tamagui/lucide-icons';
+// Explicit list (not `export *`) to avoid name collisions with the Tamagui
+// primitives above (lucide also has Text/Heading/View/Circle/Square/Badge…).
+export {
+  Plus,
+  Sparkles,
+  Zap,
+  Megaphone,
+  Trash2,
+  Download,
+  Wand2,
+  Check,
+  ImagePlus,
+  X,
+  Play,
+  RefreshCw,
+  Copy,
+  Calendar,
+  Target,
+  ExternalLink,
+  Film,
+  MessageSquare,
+  AlertCircle,
+  ChevronDown,
+  ChevronLeft,
+} from '@tamagui/lucide-icons';
 
 // ─── Badge ────────────────────────────────────────────────────────────────────
 type BadgeVariant = 'default' | 'info' | 'success' | 'error' | 'warning';
