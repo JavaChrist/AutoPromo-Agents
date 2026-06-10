@@ -19,8 +19,8 @@ export function apiBase(): string {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** HTTP statuses worth retrying (transient gateway/timeout errors). */
-const TRANSIENT_STATUS = new Set([502, 503, 504]);
+/** HTTP statuses worth retrying (transient gateway/timeout/internal errors). */
+const TRANSIENT_STATUS = new Set([500, 502, 503, 504]);
 
 interface PostOptions {
   /** Number of extra attempts on transient errors (502/503/504/network). Default 0. */
@@ -73,13 +73,19 @@ export async function postJSON<T = any>(
     }
 
     if (!res.ok) {
-      const rawError = json?.error;
-      const message =
+      // Our routes return { error }; platform/upstream errors may use { message }.
+      const rawError = json?.error ?? json?.message;
+      const extracted =
         typeof rawError === 'string'
           ? rawError
-          : rawError
-            ? JSON.stringify(rawError)
-            : `Échec de la requête IA (${res.status}).`;
+          : rawError?.message && typeof rawError.message === 'string'
+            ? rawError.message
+            : rawError
+              ? JSON.stringify(rawError)
+              : undefined;
+      const message = extracted
+        ? `${extracted}${res.status >= 500 ? ` (${res.status}, réessaie dans un instant)` : ''}`
+        : `Le service IA a échoué (${res.status}). Réessaie dans un instant.`;
       lastError = new Error(message);
       if (TRANSIENT_STATUS.has(res.status) && attempt < retries) {
         await sleep(1500 * (attempt + 1));
