@@ -197,6 +197,8 @@ export async function generateVideoFromScript(
 - Lighting and mood
 - Camera movements
 - Dominant colors and composition
+
+CRITICAL: AI video models CANNOT render legible text. Do NOT include any on-screen text, captions, subtitles, UI labels, brand names, URLs or logos — they always come out garbled/misspelled. Keep the scene purely visual and text-free.
 ${screenshotInstruction}
 
 Product: ${campaign.product_name}
@@ -221,8 +223,8 @@ Write ONE paragraph of 60-100 words in English, dense and visual, optimized for 
     visualPrompt = object.prompt;
   } else {
     visualPrompt = fromScreenshot
-      ? `Cinematic promotional video starting from the provided real screenshot of the "${campaign.product_name}" app interface. Gentle camera push-in over the UI, interface elements subtly animating (smooth scrolls, taps, micro-interactions), modern professional lighting, then a tasteful zoom-out revealing the app on a smartphone in a real-life scene. ${campaign.pitch}. Clean, polished tech advertisement style.`
-      : `Modern cinematic promotional video for "${campaign.product_name}": ${campaign.pitch}. Dynamic tracking shots, vibrant professional lighting, contemporary UI mockups on screens, energetic transitions. Target audience: ${campaign.target_audience || 'general public'}. Clean, polished tech advertisement style.`;
+      ? `Cinematic promotional video starting from the provided real screenshot of the app interface. Gentle camera push-in over the UI, interface elements subtly animating (smooth scrolls, taps, micro-interactions), modern professional lighting, then a tasteful zoom-out revealing the app on a smartphone in a real-life scene. ${campaign.pitch}. Clean, polished tech advertisement style. No added on-screen text, captions or logos.`
+      : `Modern cinematic promotional video about: ${campaign.pitch}. Dynamic tracking shots, vibrant professional lighting, real-life lifestyle scenes, energetic transitions. Target audience: ${campaign.target_audience || 'general public'}. Clean, polished tech advertisement style. Purely visual — NO on-screen text, captions, subtitles, logos or readable UI labels (AI video renders text garbled).`;
   }
 
   const tryModel = (model: string, duration: string) =>
@@ -290,6 +292,8 @@ For each scene, produce:
 - A short FRENCH title (3-6 words) describing what happens
 - A FRENCH description (1 sentence) explaining the visual narrative
 - A dense ENGLISH cinematic prompt (50-80 words) optimized for an AI video model (Veo/Sora/Kling). Include: subject, action, visual style, lighting, camera movement, dominant colors. NO narration text — only visuals.
+
+CRITICAL: AI video models CANNOT render legible text. Do NOT ask for any on-screen text, captions, subtitles, UI labels, brand names, URLs or logos in the prompt — they always come out garbled/misspelled. Describe purely visual, text-free scenes (objects, people, environments, motion).
 
 The ${options.numScenes} scenes must form a coherent narrative arc:
 - Scene 1: Hook / problem
