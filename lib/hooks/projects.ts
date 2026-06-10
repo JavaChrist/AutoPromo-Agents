@@ -176,16 +176,23 @@ export function useGenerateAllScenes() {
           })
         );
 
-        const failed = results.filter((r) => r.status === 'rejected').length;
+        const rejected = results.filter(
+          (r): r is PromiseRejectedResult => r.status === 'rejected'
+        );
+        const failed = rejected.length;
+        // Surface the real upstream reason (e.g. the fal.ai 422 detail) instead
+        // of a generic message, so the user knows what to fix.
+        const reason = failed > 0 ? getErrorMessage(rejected[0].reason) : '';
+
         await db.videoProjects.update(project.id, {
           status: failed === scenes.length ? 'failed' : 'ready',
         });
 
         if (failed > 0 && failed < scenes.length) {
-          throw new Error(`${failed} scène(s) sur ${scenes.length} ont échoué.`);
+          throw new Error(`${failed} scène(s) sur ${scenes.length} ont échoué.${reason ? ` Raison : ${reason}` : ''}`);
         }
         if (failed === scenes.length) {
-          throw new Error('Toutes les scènes ont échoué.');
+          throw new Error(`Toutes les scènes ont échoué.${reason ? ` Raison : ${reason}` : ''}`);
         }
       } catch (err) {
         throw new Error(getErrorMessage(err));

@@ -167,10 +167,6 @@ export function LongFormVideoSection({ campaign, script }: Props) {
           >
             {createMut.isPending ? 'Planification…' : `Planifier ${preset.scenes} scènes`}
           </Button>
-
-          <SizableText size="$1" color="$color10" textAlign="center">
-            💡 Coût estimé : ~{(2.5 * preset.scenes).toFixed(1)} crédits pour {preset.scenes} clips
-          </SizableText>
         </YStack>
       </Card>
 
