@@ -121,9 +121,20 @@ async function generateVideo(options: {
   duration: string;
   image_url?: string;
 }): Promise<string> {
+  // Veo image-to-video only accepts auto/16:9/9:16 (no 1:1) → fall back to auto.
+  let aspectRatio = options.aspect_ratio;
+  if (
+    options.image_url &&
+    options.model.includes('veo') &&
+    aspectRatio !== '16:9' &&
+    aspectRatio !== '9:16'
+  ) {
+    aspectRatio = 'auto';
+  }
+
   const input: Record<string, any> = {
     prompt: options.prompt,
-    aspect_ratio: options.aspect_ratio,
+    aspect_ratio: aspectRatio,
     duration: formatDuration(options.model, options.duration),
   };
   if (options.image_url) input.image_url = options.image_url;
