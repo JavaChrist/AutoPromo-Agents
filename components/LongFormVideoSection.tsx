@@ -274,16 +274,25 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
         url: overlayUrl.trim() || undefined,
       };
       const hasOverlays = !!(overlays.title || overlays.cta || overlays.url);
-      const { url } = await mergeScenes(urls, project.title, {
+      const { url, overlayApplied, overlayWarning } = await mergeScenes(urls, project.title, {
         audioUrl,
         overlays: hasOverlays ? overlays : undefined,
         totalDuration: project.target_duration,
       });
       setMergedUrl(url);
-      toast('Vidéo assemblée !', {
-        message: audioUrl ? 'Montage complet avec voix off prêt.' : 'Ton montage complet est prêt.',
-        variant: 'success',
-      });
+      if (hasOverlays && overlayWarning) {
+        toast('Vidéo assemblée (sans incrustation)', { message: overlayWarning, variant: 'error' });
+      } else {
+        toast('Vidéo assemblée !', {
+          message:
+            hasOverlays && overlayApplied
+              ? 'Montage avec voix off et texte incrusté prêt.'
+              : audioUrl
+                ? 'Montage complet avec voix off prêt.'
+                : 'Ton montage complet est prêt.',
+          variant: 'success',
+        });
+      }
     } catch (err: any) {
       toast('Fusion impossible', { message: describeGenerationError(err), variant: 'error' });
     } finally {

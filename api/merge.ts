@@ -14,8 +14,20 @@ interface Overlays {
 
 /** Locates a bundled TTF font for ffmpeg drawtext (best-effort). */
 function findFontFile(): string | null {
+  const candidates: string[] = [];
+  // require.resolve also signals the Vercel bundler (nft) to include the asset.
+  try {
+    candidates.push(require.resolve('@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf'));
+  } catch {
+    /* not resolvable in this context */
+  }
   const rel = 'node_modules/@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf';
-  const candidates = [path.join(process.cwd(), rel), path.join('/var/task', rel)];
+  candidates.push(
+    path.join(process.cwd(), rel),
+    path.join('/var/task', rel),
+    path.join(__dirname, '..', rel),
+    path.join(__dirname, '..', '..', rel)
+  );
   for (const c of candidates) {
     try {
       if (existsSync(c)) return c;
@@ -35,10 +47,11 @@ async function buildOverlayFilter(
   work: string,
   overlays: Overlays | undefined,
   totalDuration: number | undefined
-): Promise<string | null> {
-  if (!overlays) return null;
+): Promise<{ filter: string | null; reason?: string }> {
+  const requested = !!(overlays && (overlays.title?.trim() || overlays.cta?.trim() || overlays.url?.trim()));
+  if (!overlays || !requested) return { filter: null };
   const font = findFontFile();
-  if (!font) return null;
+  if (!font) return { filter: null, reason: 'police introuvable côté serveur' };
 
   const fontPath = font.replace(/\\/g, '/');
   const parts: string[] = [];
@@ -72,7 +85,7 @@ async function buildOverlayFilter(
     );
   }
 
-  return parts.length ? parts.join(',') : null;
+  return { filter: parts.length ? parts.join(',') : null };
 }
 
 /**
@@ -174,9 +187,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
 
     // Optional text overlays (brand/title + CTA + URL) burned onto the video.
-    // Best-effort: if the font is missing or ffmpeg fails, keep the plain merge.
+    // Best-effort: if the font is missing or ffmpeg fails, keep the plain merge
+    // but report why via `overlayWarning`.
     let videoFile = out;
-    const overlayFilter = await buildOverlayFilter(work, overlays, totalDuration);
+    let overlayApplied = false;
+    let overlayWarning: string | undefined;
+    const { filter: overlayFilter, reason: overlayReason } = await buildOverlayFilter(
+      work,
+      overlays,
+      totalDuration
+    );
+    if (overlayReason) {
+      overlayWarning = `Incrustation ignorée : ${overlayReason}.`;
+      console.error('[merge] overlay skipped', { reason: overlayReason });
+    }
     if (overlayFilter) {
       const outOverlaid = path.join(work, 'overlaid.mp4');
       try {
@@ -186,8 +210,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
           '-c:a', 'copy', '-movflags', '+faststart', outOverlaid,
         ]);
         videoFile = outOverlaid;
-      } catch {
-        // Overlay failed (e.g. font/codec issue) → fall back to the plain merge.
+        overlayApplied = true;
+      } catch (e: any) {
+        // Overlay failed (e.g. codec issue) → fall back to the plain merge.
+        overlayWarning = `Incrustation échouée : ${String(e?.message || e).slice(-300)}`;
+        console.error('[merge] overlay ffmpeg error', { message: String(e?.message || e) });
         videoFile = out;
       }
     }
@@ -228,7 +255,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       contentType: 'video/mp4',
     });
 
-    res.status(200).json({ url: blob.url, size: data.length });
+    res.status(200).json({ url: blob.url, size: data.length, overlayApplied, overlayWarning });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || 'Échec de la fusion.' });
   } finally {

@@ -1,6 +1,8 @@
 export interface MergeResult {
   url: string;
   size: number;
+  overlayApplied?: boolean;
+  overlayWarning?: string;
 }
 
 export interface MergeOverlays {
