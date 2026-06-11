@@ -17,6 +17,7 @@ import {
   Badge,
   Divider,
   BlinkToggleGroup,
+  TextArea,
   toast,
   Sparkles,
   Copy,
@@ -36,6 +37,7 @@ import {
   useGenerateContent,
   useDeleteCampaign,
   useStuckGenerationGuard,
+  useUpdateVideoScript,
 } from '@/lib/hooks';
 import { PLATFORM_META, type Platform, type SocialPost } from '@/lib/types';
 import { describeGenerationError } from '@/lib/errors';
@@ -320,6 +322,8 @@ function AgentStatus({ label, state }: { label: string; state: AgentStepState })
 }
 
 function VideoSection({ script }: { script: any }) {
+  const updateMut = useUpdateVideoScript();
+
   if (!script) {
     return (
       <YStack padding="$5" alignItems="center">
@@ -327,16 +331,40 @@ function VideoSection({ script }: { script: any }) {
       </YStack>
     );
   }
+
+  const save = (field: 'hook' | 'storyboard' | 'voiceover' | 'cta') => async (value: string) => {
+    await updateMut.mutateAsync({
+      id: script.id,
+      campaignId: script.campaign_id,
+      patch: { [field]: value },
+    });
+  };
+
   return (
     <YStack padding="$5" gap="$4">
-      <ContentBlock title="🎯 Hook (3 premières secondes)" content={script.hook} />
-      <ContentBlock title="🎬 Storyboard" content={script.storyboard} />
+      <SizableText size="$2" color="$color10">
+        ✏️ Tu peux modifier chaque bloc, puis « Enregistrer ». Le texte de la voix off et le
+        storyboard servent ensuite à générer les clips et les scènes long format.
+      </SizableText>
+      <ContentBlock
+        title="🎯 Hook (3 premières secondes)"
+        content={script.hook}
+        onSave={save('hook')}
+      />
+      <ContentBlock
+        title="🎬 Storyboard"
+        content={script.storyboard}
+        multiline
+        onSave={save('storyboard')}
+      />
       <ContentBlock
         title="🗣️ Voix off"
         content={script.voiceover}
-        meta={`${script.duration_sec || 30}s • ${(script.voiceover || '').split(/\s+/).length} mots`}
+        multiline
+        meta={`${script.duration_sec || 30}s • ${(script.voiceover || '').split(/\s+/).filter(Boolean).length} mots`}
+        onSave={save('voiceover')}
       />
-      <ContentBlock title="📣 Call to action" content={script.cta} />
+      <ContentBlock title="📣 Call to action" content={script.cta} onSave={save('cta')} />
     </YStack>
   );
 }
@@ -416,12 +444,35 @@ function ContentBlock({
   title,
   content,
   meta,
+  multiline,
+  onSave,
 }: {
   title: string;
   content?: string;
   meta?: string;
+  multiline?: boolean;
+  onSave?: (value: string) => Promise<void>;
 }) {
-  if (!content) return null;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(content ?? '');
+  const [saving, setSaving] = useState(false);
+
+  if (!content && !editing && !onSave) return null;
+
+  async function handleSave() {
+    if (!onSave) return;
+    setSaving(true);
+    try {
+      await onSave(draft);
+      setEditing(false);
+      toast('Enregistré', { variant: 'success' });
+    } catch (err: any) {
+      toast('Erreur', { message: err?.message || 'Sauvegarde impossible.', variant: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <Card backgroundColor="$color2" borderColor="$color4" borderWidth={1} padding="$4">
       <YStack gap="$2">
@@ -429,20 +480,63 @@ function ContentBlock({
           <SizableText size="$4" fontWeight="700" color="$color12">
             {title}
           </SizableText>
-          <Button
-            size="$2"
-            chromeless
-            icon={<Copy size={14} />}
-            onPress={async () => {
-              await Clipboard.setStringAsync(content);
-              toast('Copié !', { variant: 'success' });
-            }}
-          >
-            Copier
-          </Button>
+          <XStack gap="$1" alignItems="center">
+            {onSave && !editing ? (
+              <Button
+                size="$2"
+                chromeless
+                onPress={() => {
+                  setDraft(content ?? '');
+                  setEditing(true);
+                }}
+              >
+                ✏️ Modifier
+              </Button>
+            ) : null}
+            <Button
+              size="$2"
+              chromeless
+              icon={<Copy size={14} />}
+              onPress={async () => {
+                await Clipboard.setStringAsync(content ?? '');
+                toast('Copié !', { variant: 'success' });
+              }}
+            >
+              Copier
+            </Button>
+          </XStack>
         </XStack>
-        <SizableText size="$3" color="$color12" lineHeight="$3">{content}</SizableText>
-        {meta ? <SizableText size="$2" color="$color10">{meta}</SizableText> : null}
+
+        {editing ? (
+          <YStack gap="$2">
+            <TextArea
+              value={draft}
+              onChangeText={setDraft}
+              minHeight={multiline ? 140 : 70}
+              size="$3"
+              backgroundColor="$color1"
+              color="$color12"
+            />
+            <XStack gap="$2">
+              <Button
+                size="$2"
+                icon={saving ? <Spinner size="small" /> : <Check size={14} />}
+                disabled={saving}
+                onPress={handleSave}
+              >
+                Enregistrer
+              </Button>
+              <Button size="$2" chromeless disabled={saving} onPress={() => setEditing(false)}>
+                Annuler
+              </Button>
+            </XStack>
+          </YStack>
+        ) : (
+          <SizableText size="$3" color="$color12" lineHeight="$3">
+            {content}
+          </SizableText>
+        )}
+        {meta && !editing ? <SizableText size="$2" color="$color10">{meta}</SizableText> : null}
       </YStack>
     </Card>
   );

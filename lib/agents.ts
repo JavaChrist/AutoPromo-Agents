@@ -30,8 +30,19 @@ const TONE_INSTRUCTIONS: Record<string, string> = {
 
 // ─── Script vidéo ────────────────────────────────────────────────────────────
 
+const SCRIPT_ANGLES = [
+  "Angle problème → solution (avant/après) : montre la galère, puis le soulagement avec le produit.",
+  'Angle émotionnel : le bénéfice ressenti au quotidien, la tranquillité gagnée.',
+  "Angle démo produit : met en scène l'app en action, fonctionnalité phare.",
+  "Angle storytelling : une journée type d'un utilisateur cible.",
+  'Angle résultats/chiffres : gain de temps, économies, efficacité.',
+  "Angle objection : lève le frein principal de la cible et rassure.",
+];
+
 export async function generateVideoScript(campaign: Campaign): Promise<ScriptResult> {
   const toneInstruction = TONE_INSTRUCTIONS[campaign.tone || 'professionnel'] || '';
+  // Pick a random creative angle so each (re)generation produces a different script.
+  const angle = SCRIPT_ANGLES[Math.floor(Math.random() * SCRIPT_ANGLES.length)];
 
   const object = await generateObject<ScriptResult>(
     `Tu es un expert en marketing vidéo pour applications PWA. Génère un script de vidéo de présentation de 30 secondes pour ce produit :
@@ -41,6 +52,9 @@ Pitch : ${campaign.pitch}
 Cible : ${campaign.target_audience || 'grand public'}
 URL : ${campaign.product_url || 'n/a'}
 ${toneInstruction}
+
+Angle créatif imposé pour CETTE version (différent à chaque génération) : ${angle}
+Propose une accroche et des formulations originales, évite les tournures génériques déjà vues.
 
 IMPORTANT : tout le contenu généré (hook, storyboard, voix off, CTA) doit être rédigé OBLIGATOIREMENT en français. Le script doit être percutant dès la première seconde (règle des 3s), avec un CTA clair à la fin. Le storyboard décrit 4-5 plans avec timings précis.`,
     {
