@@ -115,17 +115,22 @@ function bottomElement(cta: string | undefined, url: string | undefined, W: numb
  * ffmpeg-static build has no `drawtext`/libfreetype, so text is rasterized with
  * Satori instead). Returns the ffmpeg args, or a reason when skipped.
  */
+type OverlayResult =
+  | { ok: true; inputs: string[]; filterComplex: string; mapLabel: string }
+  | { ok: false; reason: string }
+  | null;
+
 async function buildOverlay(
   work: string,
   overlays: Overlays | undefined,
   totalDuration: number | undefined,
   aspectRatio: string | undefined
-): Promise<{ inputs: string[]; filterComplex: string; mapLabel: string } | { reason: string } | null> {
+): Promise<OverlayResult> {
   const requested = !!(overlays && (overlays.title?.trim() || overlays.cta?.trim() || overlays.url?.trim()));
   if (!overlays || !requested) return null;
 
   const font = findFontFile();
-  if (!font) return { reason: 'police introuvable côté serveur' };
+  if (!font) return { ok: false, reason: 'police introuvable côté serveur' };
 
   // Loaded lazily so a native-module load failure (resvg) only disables the
   // overlay — it never crashes the whole merge function.
@@ -135,7 +140,7 @@ async function buildOverlay(
     satori = (await import('satori')).default;
     ({ Resvg } = await import('@resvg/resvg-js'));
   } catch {
-    return { reason: 'moteur de rendu texte indisponible côté serveur' };
+    return { ok: false, reason: 'moteur de rendu texte indisponible côté serveur' };
   }
 
   const fontData = await fs.readFile(font);
@@ -176,7 +181,7 @@ async function buildOverlay(
     idx++;
   }
 
-  return { inputs, filterComplex: fc.join(';'), mapLabel: cur };
+  return { ok: true, inputs, filterComplex: fc.join(';'), mapLabel: cur };
 }
 
 /**
@@ -287,10 +292,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     let overlayWarning: string | undefined;
     try {
       const overlay = await buildOverlay(work, overlays, totalDuration, aspectRatio);
-      if (overlay && 'reason' in overlay) {
+      if (overlay && !overlay.ok) {
         overlayWarning = `Incrustation ignorée : ${overlay.reason}.`;
         console.error('[merge] overlay skipped', { reason: overlay.reason });
-      } else if (overlay) {
+      } else if (overlay && overlay.ok) {
         const outOverlaid = path.join(work, 'overlaid.mp4');
         await runFfmpeg(ffmpegPath, [
           '-y', '-i', out, ...overlay.inputs,
