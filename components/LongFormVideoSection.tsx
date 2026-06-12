@@ -393,6 +393,45 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
           <Button chromeless size="$2" icon={<Trash2 size={16} color="$red10" />} onPress={onDelete} />
         </XStack>
 
+        {/* Voix off — texte éditable à tout moment (utilisé au montage pour la TTS) */}
+        <YStack
+          gap="$2"
+          backgroundColor="$color3"
+          borderRadius="$3"
+          padding="$3"
+          borderWidth={1}
+          borderColor="$color4"
+        >
+          <Label color="$color12" fontWeight="600">🗣️ Texte de la voix off (modifiable)</Label>
+          <SizableText size="$1" color="$color10">
+            Ce texte sera lu par la voix off lors du montage. Modifie-le ou complète-le à tout moment.
+          </SizableText>
+          <TextArea
+            value={voiceoverDraft}
+            onChangeText={setVoiceoverDraft}
+            placeholder="Saisis ou colle le texte que la voix off doit lire (en français)…"
+            minHeight={100}
+            size="$3"
+            backgroundColor="$color1"
+            color="$color12"
+          />
+          <XStack gap="$2" alignItems="center">
+            <Button
+              size="$2"
+              icon={updateVoiceoverMut.isPending ? <Spinner size="small" /> : <Check size={14} />}
+              disabled={updateVoiceoverMut.isPending}
+              onPress={handleSaveVoiceover}
+            >
+              Enregistrer le texte
+            </Button>
+            {!voiceoverText ? (
+              <SizableText size="$1" color="$color10" flex={1}>
+                (Vide pour l'instant)
+              </SizableText>
+            ) : null}
+          </XStack>
+        </YStack>
+
         {/* Bouton générer tout */}
         {scenes.length > 0 && !allReady && (
           <Button
@@ -446,35 +485,15 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
                 placeholder="Voix off"
               />
               {voice !== 'none' ? (
-                <YStack gap="$2">
-                  <SizableText size="$1" color="$color10">
-                    Texte lu par la voix off (modifiable) :
+                voiceoverText ? (
+                  <SizableText size="$1" color="$color10" numberOfLines={2}>
+                    Texte lu : « {voiceoverText} » (modifiable plus haut)
                   </SizableText>
-                  <TextArea
-                    value={voiceoverDraft}
-                    onChangeText={setVoiceoverDraft}
-                    placeholder="Saisis ou colle ici le texte que la voix off doit lire (en français)…"
-                    minHeight={90}
-                    size="$3"
-                    backgroundColor="$color1"
-                    color="$color12"
-                  />
-                  <XStack gap="$2" alignItems="center">
-                    <Button
-                      size="$2"
-                      icon={updateVoiceoverMut.isPending ? <Spinner size="small" /> : <Check size={14} />}
-                      disabled={updateVoiceoverMut.isPending}
-                      onPress={handleSaveVoiceover}
-                    >
-                      Enregistrer le texte
-                    </Button>
-                    {!voiceoverText ? (
-                      <SizableText size="$1" color="$red10" flex={1}>
-                        Texte vide — saisis-le pour générer la voix off.
-                      </SizableText>
-                    ) : null}
-                  </XStack>
-                </YStack>
+                ) : (
+                  <SizableText size="$1" color="$red10">
+                    Texte de voix off vide — renseigne-le dans le bloc « Texte de la voix off » plus haut.
+                  </SizableText>
+                )
               ) : null}
             </YStack>
 
