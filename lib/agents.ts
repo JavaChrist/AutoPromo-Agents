@@ -1,4 +1,5 @@
 import { postJSON } from './api';
+import { buildVeoPrompt, type SceneType } from './video/buildVeoPrompt';
 import type { Campaign, Platform } from './types';
 
 interface ScriptResult {
@@ -134,6 +135,7 @@ async function generateVideo(options: {
   aspect_ratio: string;
   duration: string;
   image_url?: string;
+  negative_prompt?: string;
 }): Promise<string> {
   // Veo image-to-video only accepts auto/16:9/9:16 (no 1:1) → fall back to auto.
   let aspectRatio = options.aspect_ratio;
@@ -152,6 +154,11 @@ async function generateVideo(options: {
     duration: formatDuration(options.model, options.duration),
   };
   if (options.image_url) input.image_url = options.image_url;
+  // Only Kling documents a `negative_prompt` field; sending it to Veo Fast would
+  // be rejected (422), so the static lock for Veo relies on the prompt suffix.
+  if (options.negative_prompt && options.model.includes('kling')) {
+    input.negative_prompt = options.negative_prompt;
+  }
 
   const { video_url } = await postJSON<{ video_url: string }>('/api/ai/video', {
     model: options.model,
@@ -211,7 +218,7 @@ export async function generateVideoFromScript(
   let visualPrompt = '';
 
   const screenshotInstruction = fromScreenshot
-    ? `\nIMPORTANT: The video STARTS from a real screenshot of the app's interface (provided as the first frame). Describe how to bring this UI to life: subtle camera push-in or pan over the interface, UI elements animating (taps, scrolls, transitions), then optionally widening to show the app in a real-life context. Do NOT invent a different interface — the existing screenshot IS the app.`
+    ? `\nIMPORTANT: The video STARTS from a real screenshot of the app interface (first frame). The on-screen content MUST stay completely static and unchanged — do NOT animate, navigate, tap, scroll or redraw anything on the screen, and do NOT invent a different interface. ALL motion comes only from a slow, subtle camera movement and the surrounding real-life environment.`
     : '';
 
   if (script?.storyboard) {
@@ -252,13 +259,24 @@ Write ONE paragraph of 60-100 words in English, dense and visual, optimized for 
       : `Modern cinematic promotional video about: ${campaign.pitch}. Dynamic tracking shots, vibrant professional lighting, real-life lifestyle scenes, energetic transitions. Target audience: ${campaign.target_audience || 'general public'}. Clean, polished tech advertisement style. Purely visual — NO on-screen text, captions, subtitles, logos or readable UI labels (AI video renders text garbled).`;
   }
 
+  // Hard-lock the prompt according to the scene type (static screen when a
+  // seed screenshot is used).
+  const sceneType: SceneType = fromScreenshot ? 'screen' : 'ambiance';
+  const { prompt: lockedPrompt, negativePrompt } = buildVeoPrompt({
+    type: sceneType,
+    prompt: visualPrompt,
+    imageUrl: options.image_url,
+  });
+  const finalPrompt = lockedPrompt ?? visualPrompt;
+
   const tryModel = (model: string, duration: string) =>
     generateVideo({
-      prompt: visualPrompt,
+      prompt: finalPrompt,
       model,
       aspect_ratio: options.aspect_ratio,
       duration,
       ...(options.image_url ? { image_url: options.image_url } : {}),
+      ...(negativePrompt ? { negative_prompt: negativePrompt } : {}),
     });
 
   // With a screenshot, switch to the image-to-video variant of the chosen model.
@@ -282,7 +300,7 @@ Write ONE paragraph of 60-100 words in English, dense and visual, optimized for 
 
   return {
     video_url: videoUrl,
-    prompt: visualPrompt,
+    prompt: finalPrompt,
   };
 }
 
@@ -320,6 +338,8 @@ For each scene, produce:
 
 CRITICAL: AI video models CANNOT render legible text. Do NOT ask for any on-screen text, captions, subtitles, UI labels, brand names, URLs or logos in the prompt — they always come out garbled/misspelled. Describe purely visual, text-free scenes (objects, people, environments, motion).
 
+CRITICAL: If a scene shows an app screen/interface, the on-screen content MUST stay static — do NOT describe tapping, navigating, scrolling, UI animations or screen transitions. Motion for such scenes comes only from a subtle camera move and the surrounding environment.
+
 The ${options.numScenes} scenes must form a coherent narrative arc:
 - Scene 1: Hook / problem
 - Middle scenes: Solution / features / benefits
@@ -356,9 +376,19 @@ export async function generateSceneClip(
 ): Promise<string> {
   // A screenshot may be embedded in the prompt → switch to image-to-video.
   const { prompt: basePrompt, imageUrl } = extractSceneScreenshot(rawPrompt);
-  const prompt = imageUrl
-    ? `The video STARTS from the provided real screenshot of the app's interface (first frame). Bring this exact UI to life — do NOT invent a different interface. ${basePrompt}`
-    : basePrompt;
+
+  // Hard-lock the prompt: a scene with a seed screenshot is a `screen` scene
+  // whose on-screen content must stay static; otherwise it's `ambiance`.
+  const sceneType: SceneType = imageUrl ? 'screen' : 'ambiance';
+  const lead = imageUrl
+    ? 'The video starts from the provided real screenshot of the app interface (first frame), shown as a static screen. '
+    : '';
+  const { prompt: lockedPrompt, negativePrompt } = buildVeoPrompt({
+    type: sceneType,
+    prompt: `${lead}${basePrompt}`,
+    imageUrl,
+  });
+  const prompt = lockedPrompt ?? basePrompt;
 
   const primaryModel = imageUrl ? (I2V_VARIANTS[options.model] ?? options.model) : options.model;
   const fallbackModel = imageUrl ? KLING_I2V : KLING_T2V;
@@ -370,6 +400,7 @@ export async function generateSceneClip(
       aspect_ratio: options.aspect_ratio,
       duration,
       ...(imageUrl ? { image_url: imageUrl } : {}),
+      ...(negativePrompt ? { negative_prompt: negativePrompt } : {}),
     });
 
   try {

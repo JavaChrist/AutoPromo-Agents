@@ -20,6 +20,7 @@
     "doctor": "cross-env EXPO_NO_TELEMETRY=1 npx expo doctor",
     "upgrade": "cross-env EXPO_NO_TELEMETRY=1 npx expo upgrade",
     "lint": "cross-env EXPO_NO_TELEMETRY=1 npx expo lint",
+    "test": "vitest run",
     "prebuild": "cross-env EXPO_NO_TELEMETRY=1 npx expo prebuild",
     "prebuild:clean": "cross-env EXPO_NO_TELEMETRY=1 npx expo prebuild --clean"
   },
@@ -78,7 +79,8 @@
     "cross-env": "^7.0.3",
     "eslint": "^9.31.0",
     "eslint-config-expo": "~10.0.0",
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "vitest": "^4.1.8"
   },
   "overrides": {
     "@tamagui/core": "2.1.0"

@@ -11,6 +11,10 @@
     "api/ai/video.ts": {
       "maxDuration": 300
     },
+    "api/ai/endcard.ts": {
+      "maxDuration": 60,
+      "includeFiles": "node_modules/ffmpeg-static/**"
+    },
     "api/ai/text.ts": {
       "maxDuration": 60
     },
