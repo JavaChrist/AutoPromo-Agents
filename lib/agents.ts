@@ -16,8 +16,22 @@ interface PostResult {
 }
 
 /** Structured text generation via the backend Gemini route. */
-async function generateObject<T>(prompt: string, schema: object): Promise<T> {
-  const { object } = await postJSON<{ object: T }>('/api/ai/text', { prompt, schema }, { retries: 2 });
+async function generateObject<T>(
+  prompt: string,
+  schema: object,
+  opts?: { temperature?: number }
+): Promise<T> {
+  const { object } = await postJSON<{ object: T }>(
+    '/api/ai/text',
+    {
+      prompt,
+      schema,
+      // Fresh seed each call → varied outputs for identical prompts.
+      seed: Math.floor(Math.random() * 1_000_000_000),
+      ...(opts?.temperature != null ? { temperature: opts.temperature } : {}),
+    },
+    { retries: 2 }
+  );
   return object;
 }
 
@@ -68,7 +82,8 @@ IMPORTANT : tout le contenu généré (hook, storyboard, voix off, CTA) doit êt
         duration_sec: { type: 'number', description: 'Durée totale en secondes' },
       },
       required: ['hook', 'storyboard', 'voiceover', 'cta', 'duration_sec'],
-    }
+    },
+    { temperature: 1.25 }
   );
 
   return object;
@@ -313,15 +328,29 @@ export interface ScenePlan {
   prompt: string;
 }
 
+const NARRATIVE_STYLES = [
+  'Style documentaire/lifestyle réaliste : vraies situations du quotidien.',
+  'Style cinématique premium : plans léchés, ralentis, lumière travaillée.',
+  'Style dynamique/énergique : coupes rapides, mouvement, rythme soutenu.',
+  'Style intimiste/émotionnel : gros plans, ambiance chaleureuse, proximité.',
+  'Style moderne/tech : esthétique épurée, graphique, futuriste.',
+  'Style narratif "mini-histoire" : un avant/pendant/après clair.',
+];
+
 export async function planVideoScenes(
   campaign: Campaign,
   script: { hook?: string; storyboard?: string; voiceover?: string } | null,
   options: { numScenes: number; sceneDuration: string; totalDuration: number }
 ): Promise<ScenePlan[]> {
   const toneInstruction = TONE_INSTRUCTIONS[campaign.tone || 'professionnel'] || '';
+  // Random visual style so each storyboard differs from the previous one.
+  const style = NARRATIVE_STYLES[Math.floor(Math.random() * NARRATIVE_STYLES.length)];
 
   const object = await generateObject<{ scenes: ScenePlan[] }>(
     `You are an expert video director. Break down a ${options.totalDuration}-second promotional video into EXACTLY ${options.numScenes} sequential scenes (each ${options.sceneDuration}).
+
+Style visuel imposé pour CETTE version (différent à chaque génération) : ${style}
+Propose un découpage et des plans ORIGINAUX, évite de reproduire un storyboard générique déjà vu.
 
 Product: ${campaign.product_name}
 Pitch: ${campaign.pitch}
@@ -364,7 +393,8 @@ Each prompt must be self-contained (the AI generates each clip independently wit
         },
       },
       required: ['scenes'],
-    }
+    },
+    { temperature: 1.2 }
   );
 
   return object.scenes.slice(0, options.numScenes);

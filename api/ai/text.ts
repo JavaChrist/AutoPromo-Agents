@@ -49,6 +49,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     if (schema && typeof schema === 'object') {
       generationConfig.responseSchema = schema;
     }
+    // Diversity controls: higher temperature + a fresh seed each call so the
+    // same prompt yields varied outputs instead of always the same script.
+    generationConfig.temperature = typeof body.temperature === 'number' ? body.temperature : 1.0;
+    if (typeof body.seed === 'number') generationConfig.seed = body.seed;
+    if (typeof body.topP === 'number') generationConfig.topP = body.topP;
 
     // Pass the key via the `x-goog-api-key` header (NOT the legacy `?key=` query
     // param). The newer Google AI Studio "auth keys" (prefix `AQ.`, bound to a
