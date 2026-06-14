@@ -302,10 +302,7 @@ Write ONE paragraph of 60-100 words in English, dense and visual, optimized for 
   try {
     videoUrl = await tryModel(primaryModel, options.duration);
   } catch (err: any) {
-    const msg = String(err?.message || '').toLowerCase();
-    const isUnprocessable =
-      msg.includes('400') || msg.includes('422') || msg.includes('unprocessable') || msg.includes('invalid') || msg.includes('content policy');
-    if (isUnprocessable && primaryModel !== fallbackModel) {
+    if (isFallbackWorthy(err) && primaryModel !== fallbackModel) {
       // Kling only supports 5s/10s — clamp the requested duration to a valid value.
       videoUrl = await tryModel(fallbackModel, toKlingDuration(options.duration));
     } else {
@@ -317,6 +314,26 @@ Write ONE paragraph of 60-100 words in English, dense and visual, optimized for 
     video_url: videoUrl,
     prompt: finalPrompt,
   };
+}
+
+/**
+ * Whether a Veo/Sora failure should trigger the permissive Kling fallback.
+ * Branches on the HTTP status (carried by ApiError) first, then on message
+ * keywords — because the thrown message is fal's reason text, not the status.
+ */
+function isFallbackWorthy(err: any): boolean {
+  const status = err?.status;
+  if (status === 400 || status === 422) return true;
+  const msg = String(err?.message || '').toLowerCase();
+  return (
+    msg.includes('400') ||
+    msg.includes('422') ||
+    msg.includes('unprocessable') ||
+    msg.includes('invalid') ||
+    msg.includes('content policy') ||
+    msg.includes('did not generate') ||
+    msg.includes('expected output')
+  );
 }
 
 // ─── Long-form video: découpage en scènes ────────────────────────────────────
@@ -436,15 +453,8 @@ export async function generateSceneClip(
   try {
     return await tryModel(primaryModel, options.duration);
   } catch (err: any) {
-    const msg = String(err?.message || '').toLowerCase();
-    // On 400/422/unprocessable, fallback to Kling (most permissive on aspect ratios).
-    const isUnprocessable =
-      msg.includes('400') ||
-      msg.includes('422') ||
-      msg.includes('unprocessable') ||
-      msg.includes('invalid') ||
-      msg.includes('content policy');
-    if (isUnprocessable && primaryModel !== fallbackModel) {
+    // On 400/422/unprocessable/content issues, fallback to Kling (most permissive).
+    if (isFallbackWorthy(err) && primaryModel !== fallbackModel) {
       // Kling only supports 5s/10s — clamp the duration to a valid value.
       return await tryModel(fallbackModel, toKlingDuration(options.duration));
     }
