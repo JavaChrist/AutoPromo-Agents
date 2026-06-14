@@ -47,8 +47,23 @@ export function isNonJsonResponseError(err: unknown): boolean {
   );
 }
 
+/** True when the video model rejected the input for content-moderation reasons. */
+export function isContentFlaggedError(err: unknown): boolean {
+  const msg = getErrorMessage(err).toLowerCase();
+  return (
+    msg.includes('content checker') ||
+    msg.includes('content policy') ||
+    msg.includes('flagged') ||
+    msg.includes('content moderation') ||
+    msg.includes('safety')
+  );
+}
+
 /** Maps any generation error to a clear, user-facing French message. */
 export function describeGenerationError(err: unknown): string {
+  if (isContentFlaggedError(err)) {
+    return "Cette scène a été refusée par la modération de contenu du modèle vidéo. Essaie une autre capture d'écran, retire la capture (rendu d'ambiance), ou reformule le prompt de la scène.";
+  }
   if (isNonJsonResponseError(err)) {
     return "Le service IA a renvoyé une réponse invalide (souvent un délai dépassé ou une erreur passagère). Réessaie dans quelques instants.";
   }

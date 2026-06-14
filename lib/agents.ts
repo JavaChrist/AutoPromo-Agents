@@ -331,6 +331,8 @@ function isFallbackWorthy(err: any): boolean {
     msg.includes('unprocessable') ||
     msg.includes('invalid') ||
     msg.includes('content policy') ||
+    msg.includes('content checker') ||
+    msg.includes('flagged') ||
     msg.includes('did not generate') ||
     msg.includes('expected output')
   );
