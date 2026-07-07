@@ -36,6 +36,8 @@ import {
   useSetSceneScreenshot,
   useUpdateScenePrompt,
   useUpdateProjectVoiceover,
+  useSaveMergedVideo,
+  useDeleteMergedVideo,
 } from '@/lib/hooks';
 import {
   extractSceneScreenshot,
@@ -220,10 +222,12 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
   const failedScenes = scenes.filter((s: VideoScene) => s.status === 'failed');
 
   const updateVoiceoverMut = useUpdateProjectVoiceover();
+  const saveMergedMut = useSaveMergedVideo();
+  const deleteMergedMut = useDeleteMergedVideo();
 
   const [merging, setMerging] = useState(false);
   const [mergeStep, setMergeStep] = useState<string | null>(null);
-  const [mergedUrl, setMergedUrl] = useState<string | null>(null);
+  const [mergedUrl, setMergedUrl] = useState<string | null>(project.merged_url || null);
   const [voice, setVoice] = useState<string>('none');
 
   // Editable voiceover text (persisted to the project on save).
@@ -281,6 +285,21 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
         aspectRatio: project.aspect_ratio,
       });
       setMergedUrl(url);
+
+      // Persist the final video URL so it survives reloads (saved in AutoPromo DB).
+      try {
+        await saveMergedMut.mutateAsync({
+          projectId: project.id,
+          campaignId: project.campaign_id,
+          mergedUrl: url,
+        });
+      } catch (saveErr: any) {
+        toast('Montage non enregistré', {
+          message: "La vidéo est prête mais son enregistrement en base a échoué. Réassemble pour réessayer.",
+          variant: 'error',
+        });
+      }
+
       if (hasOverlays && overlayWarning) {
         toast('Vidéo assemblée (sans incrustation)', { message: overlayWarning, variant: 'error' });
       } else {
@@ -299,6 +318,23 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
     } finally {
       setMerging(false);
       setMergeStep(null);
+    }
+  }
+
+  async function handleDeleteMerged() {
+    if (typeof window !== 'undefined' && !window.confirm('Supprimer la vidéo montée ? Le fichier sera définitivement effacé.')) {
+      return;
+    }
+    try {
+      await deleteMergedMut.mutateAsync({
+        projectId: project.id,
+        campaignId: project.campaign_id,
+        mergedUrl,
+      });
+      setMergedUrl(null);
+      toast('Vidéo supprimée', { message: 'Le montage a été effacé.', variant: 'success' });
+    } catch (err: any) {
+      toast('Suppression impossible', { message: describeGenerationError(err), variant: 'error' });
     }
   }
 
@@ -540,25 +576,67 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
                 : `Assembler les ${readyScenes.length} scènes en 1 vidéo`}
             </Button>
 
-            {mergedUrl && (
-              <YStack gap="$2">
-                <SizableText size="$2" color="$color12" fontWeight="700">
-                  ✅ Vidéo complète
-                </SizableText>
-                <VideoClipPlayer url={mergedUrl} aspectRatio={project.aspect_ratio} />
-                <Button
-                  size="$3"
-                  icon={<Download size={14} />}
-                  onPress={() => mergedUrl && Linking.openURL(mergedUrl)}
-                >
-                  Télécharger la vidéo complète
-                </Button>
-              </YStack>
-            )}
-
             <SizableText size="$1" color="$color10">
               ⚙️ Fusion réalisée côté serveur (disponible sur la version déployée).
             </SizableText>
+          </YStack>
+        )}
+
+        {/* Vidéo montée sauvegardée (persistée en base) */}
+        {mergedUrl && (
+          <YStack
+            gap="$2"
+            backgroundColor="$color2"
+            borderRadius="$3"
+            padding="$3"
+            borderWidth={1}
+            borderColor="$green6"
+          >
+            <XStack justifyContent="space-between" alignItems="center">
+              <SizableText size="$2" color="$color12" fontWeight="700">
+                ✅ Vidéo complète enregistrée
+              </SizableText>
+              <Button
+                chromeless
+                size="$2"
+                icon={
+                  deleteMergedMut.isPending ? (
+                    <Spinner size="small" />
+                  ) : (
+                    <Trash2 size={16} color="$red10" />
+                  )
+                }
+                disabled={deleteMergedMut.isPending}
+                onPress={handleDeleteMerged}
+              />
+            </XStack>
+            <VideoClipPlayer url={mergedUrl} aspectRatio={project.aspect_ratio} />
+            <XStack gap="$2">
+              <Button
+                flex={1}
+                size="$3"
+                icon={<Download size={14} />}
+                onPress={() => mergedUrl && Linking.openURL(mergedUrl)}
+              >
+                Télécharger
+              </Button>
+              <Button
+                flex={1}
+                size="$3"
+                chromeless
+                icon={
+                  deleteMergedMut.isPending ? (
+                    <Spinner size="small" />
+                  ) : (
+                    <Trash2 size={14} color="$red10" />
+                  )
+                }
+                disabled={deleteMergedMut.isPending}
+                onPress={handleDeleteMerged}
+              >
+                Supprimer
+              </Button>
+            </XStack>
           </YStack>
         )}
 

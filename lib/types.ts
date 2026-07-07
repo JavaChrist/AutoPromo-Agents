@@ -62,6 +62,7 @@ export interface VideoProject {
   aspect_ratio: string;
   model: string;
   voiceover_full?: string;
+  merged_url?: string;
   status: 'draft' | 'planning' | 'generating' | 'ready' | 'failed';
   created_at?: string;
 }

@@ -80,6 +80,7 @@ export function normalizeProject(row: any): VideoProject {
     aspect_ratio: row.aspectRatio ?? row.aspect_ratio ?? '9:16',
     model: row.model ?? 'fal-ai/veo3.1/fast',
     voiceover_full: row.voiceoverFull ?? row.voiceover_full,
+    merged_url: row.mergedUrl ?? row.merged_url,
     status: row.status ?? 'draft',
     created_at: row.createdAt ?? row.created_at,
   };

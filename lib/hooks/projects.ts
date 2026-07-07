@@ -3,7 +3,8 @@ import { getErrorMessage } from '../errors';
 import { db } from '../db';
 import { normalizeProject, normalizeScene } from '../normalizers';
 import type { Campaign, VideoScript, VideoProject, VideoScene } from '../types';
-import { planVideoScenes, generateSceneClip, setSceneScreenshot } from '../agents';
+import { planVideoScenes, generateSceneClip, setSceneScreenshot, extractSceneScreenshot } from '../agents';
+import { deleteBlob } from '../deleteBlob';
 
 // ─── Long-form video projects ────────────────────────────────────────────────
 
@@ -238,6 +239,36 @@ export function useUpdateScenePrompt() {
   });
 }
 
+/** Persist the assembled (ffmpeg-merged) final video URL onto the project. */
+export function useSaveMergedVideo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { projectId: string; campaignId: string; mergedUrl: string }) => {
+      await db.videoProjects.update(input.projectId, {
+        mergedUrl: input.mergedUrl,
+        status: 'ready',
+      });
+    },
+    onSettled: (_, __, variables) => {
+      qc.invalidateQueries({ queryKey: ['video_projects', variables.campaignId] });
+    },
+  });
+}
+
+/** Remove the saved merged video: delete the Blob file and clear the DB column. */
+export function useDeleteMergedVideo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { projectId: string; campaignId: string; mergedUrl?: string | null }) => {
+      if (input.mergedUrl) await deleteBlob(input.mergedUrl);
+      await db.videoProjects.update(input.projectId, { mergedUrl: null });
+    },
+    onSettled: (_, __, variables) => {
+      qc.invalidateQueries({ queryKey: ['video_projects', variables.campaignId] });
+    },
+  });
+}
+
 /** Manually edit the project's voiceover text (used for the TTS voice-over). */
 export function useUpdateProjectVoiceover() {
   const qc = useQueryClient();
@@ -255,7 +286,22 @@ export function useDeleteVideoProject() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, campaignId }: { id: string; campaignId: string }) => {
-      const scenes = await db.videoScenes.list({ where: { projectId: id } });
+      const [project, scenes] = await Promise.all([
+        db.videoProjects.get(id),
+        db.videoScenes.list({ where: { projectId: id } }),
+      ]);
+
+      // Collect Blob-hosted files to clean up: the merged video + any scene
+      // screenshots (fal.ai scene clips are external and left untouched).
+      const blobUrls: string[] = [];
+      const mergedUrl = project?.merged_url ?? project?.mergedUrl;
+      if (mergedUrl) blobUrls.push(mergedUrl);
+      for (const s of scenes) {
+        const { imageUrl } = extractSceneScreenshot(s.prompt || '');
+        if (imageUrl) blobUrls.push(imageUrl);
+      }
+      if (blobUrls.length > 0) await deleteBlob(blobUrls);
+
       for (const s of scenes) await db.videoScenes.delete(s.id);
       await db.videoProjects.delete(id);
       return campaignId;
