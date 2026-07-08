@@ -51,14 +51,8 @@ export function useCreateVideoProject() {
       try {
         const { campaign, script, targetDuration, numScenes, sceneDuration, aspectRatio, model } = input;
 
-        // 1. Plan scenes with AI
-        const scenes = await planVideoScenes(campaign, script, {
-          numScenes,
-          sceneDuration,
-          totalDuration: targetDuration,
-        });
-
-        // 2. Create project
+        // No AI storyboard: create an empty project shell. The user describes each
+        // scene by hand (optionally seeding them later with the "Suggérer" button).
         const projectRow = await db.videoProjects.create({
           campaignId: campaign.id,
           userId: campaign.user_id,
@@ -66,19 +60,19 @@ export function useCreateVideoProject() {
           targetDuration,
           aspectRatio,
           model,
-          voiceoverFull: script?.voiceover,
-          status: 'planning',
+          voiceoverFull: script?.voiceover ?? '',
+          status: 'draft',
         });
 
-        // 3. Create scene rows (pending status)
-        for (const s of scenes) {
+        // Create N empty scenes, ready to be described and generated manually.
+        for (let i = 1; i <= numScenes; i++) {
           await db.videoScenes.create({
             projectId: projectRow.id,
             userId: campaign.user_id,
-            sceneIndex: s.scene_index,
-            title: s.title,
-            description: s.description,
-            prompt: s.prompt,
+            sceneIndex: i,
+            title: `Scène ${i}`,
+            description: '',
+            prompt: '',
             duration: sceneDuration,
             status: 'pending',
           });
@@ -91,6 +85,53 @@ export function useCreateVideoProject() {
     },
     onSuccess: (_, variables) => {
       qc.invalidateQueries({ queryKey: ['video_projects', variables.campaign.id] });
+    },
+  });
+}
+
+/**
+ * Optional helper: ask the AI to propose a title/description/cinematic prompt for
+ * each (empty) scene of a project. Purely opt-in — the manual workflow never
+ * requires it. Any screenshot already attached to a scene is preserved.
+ */
+export function useSuggestScenes() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      campaign: Campaign;
+      script: VideoScript | null;
+      project: VideoProject;
+      scenes: VideoScene[];
+    }) => {
+      try {
+        const { campaign, script, project, scenes } = input;
+        if (scenes.length === 0) return;
+        const sceneDuration = scenes[0]?.duration || '8s';
+
+        const plan = await planVideoScenes(campaign, script, {
+          numScenes: scenes.length,
+          sceneDuration,
+          totalDuration: project.target_duration,
+        });
+
+        const ordered = [...scenes].sort((a, b) => a.scene_index - b.scene_index);
+        for (let i = 0; i < ordered.length; i++) {
+          const p = plan.find((x) => x.scene_index === ordered[i].scene_index) ?? plan[i];
+          if (!p) continue;
+          // Keep any screenshot the user already attached to this scene.
+          const { imageUrl } = extractSceneScreenshot(ordered[i].prompt || '');
+          await db.videoScenes.update(ordered[i].id, {
+            title: p.title,
+            description: p.description,
+            prompt: setSceneScreenshot(p.prompt, imageUrl ?? null),
+          });
+        }
+      } catch (err) {
+        throw new Error(getErrorMessage(err));
+      }
+    },
+    onSettled: (_, __, variables) => {
+      qc.invalidateQueries({ queryKey: ['video_scenes', variables.project.id] });
     },
   });
 }

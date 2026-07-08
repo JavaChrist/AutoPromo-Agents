@@ -265,24 +265,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       files.push(dest);
     }
 
-    const listFile = path.join(work, 'list.txt');
-    await fs.writeFile(listFile, files.map((f) => `file '${f}'`).join('\n'), 'utf8');
+    // Normalize + concatenate with the concat FILTER (not the stream-copy
+    // demuxer): each clip is scaled/padded to a uniform WxH, fps and pixel
+    // format before being joined. This removes the stutter/frame-drops the
+    // demuxer produced when clips had different fps/timebases/codecs, and
+    // yields an accurate total duration (= sum of the real clip lengths).
+    // Clip audio is intentionally dropped (a=0) — the promo's only sound is the
+    // optional voice-over mixed in further below.
+    const { W: VW, H: VH } = overlayDims(aspectRatio);
+    const inputArgs = files.flatMap((f) => ['-i', f]);
+    const vParts = files.map(
+      (_, i) =>
+        `[${i}:v]scale=${VW}:${VH}:force_original_aspect_ratio=decrease,` +
+        `pad=${VW}:${VH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30,format=yuv420p[v${i}]`
+    );
+    const concatInputs = files.map((_, i) => `[v${i}]`).join('');
+    const filterComplex = `${vParts.join(';')};${concatInputs}concat=n=${files.length}:v=1:a=0[vout]`;
 
     const out = path.join(work, 'final.mp4');
-    try {
-      // Fast path: no re-encode (scenes share codec/resolution/fps).
-      await runFfmpeg(ffmpegPath, [
-        '-y', '-f', 'concat', '-safe', '0', '-i', listFile,
-        '-c', 'copy', '-movflags', '+faststart', out,
-      ]);
-    } catch {
-      // Robust fallback: re-encode to a uniform H.264/AAC MP4.
-      await runFfmpeg(ffmpegPath, [
-        '-y', '-f', 'concat', '-safe', '0', '-i', listFile,
-        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
-        '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', out,
-      ]);
-    }
+    await runFfmpeg(ffmpegPath, [
+      '-y', ...inputArgs,
+      '-filter_complex', filterComplex,
+      '-map', '[vout]',
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+      '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out,
+    ]);
 
     // Optional text overlays (brand/title + CTA + URL) burned onto the video.
     // Best-effort: if the font is missing or ffmpeg fails, keep the plain merge
@@ -313,32 +320,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       videoFile = out;
     }
 
-    // Optional voiceover: mix it over the merged video's audio (background
-    // lowered to 25%), or use it as the only track if the video is silent.
+    // Optional voice-over: it becomes the ONLY audio track (the merged video is
+    // silent — clip audio was dropped during concat). `apad` pads the voice with
+    // trailing silence and `-shortest` clamps to the video length, so the audio
+    // always spans the full video whether the voice is shorter or longer.
     let finalFile = videoFile;
     if (audioUrl) {
       const voiceFile = path.join(work, 'voice.mp3');
       await downloadTo(audioUrl, voiceFile);
       const outVoice = path.join(work, 'final_voice.mp4');
-      try {
-        await runFfmpeg(ffmpegPath, [
-          '-y', '-i', videoFile, '-i', voiceFile,
-          '-filter_complex',
-          '[0:a]volume=0.25[bg];[1:a]apad[vo];[bg][vo]amix=inputs=2:duration=first:dropout_transition=0[a]',
-          '-map', '0:v', '-map', '[a]',
-          '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k',
-          '-movflags', '+faststart', outVoice,
-        ]);
-      } catch {
-        // The merged video probably has no audio track → voiceover becomes the only track.
-        await runFfmpeg(ffmpegPath, [
-          '-y', '-i', videoFile, '-i', voiceFile,
-          '-filter_complex', '[1:a]apad[a]',
-          '-map', '0:v', '-map', '[a]',
-          '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k',
-          '-shortest', '-movflags', '+faststart', outVoice,
-        ]);
-      }
+      await runFfmpeg(ffmpegPath, [
+        '-y', '-i', videoFile, '-i', voiceFile,
+        '-filter_complex', '[1:a]apad[a]',
+        '-map', '0:v', '-map', '[a]',
+        '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k',
+        '-shortest', '-movflags', '+faststart', outVoice,
+      ]);
       finalFile = outVoice;
     }
 

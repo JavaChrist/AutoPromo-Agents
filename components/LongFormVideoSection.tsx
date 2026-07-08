@@ -1,10 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Linking, Image } from 'react-native';
 import {
   YStack,
   XStack,
   Card,
-  H4,
   SizableText,
   Paragraph,
   Button,
@@ -30,6 +29,7 @@ import {
   useVideoProjects,
   useVideoScenes,
   useCreateVideoProject,
+  useSuggestScenes,
   useGenerateAllScenes,
   useGenerateScene,
   useDeleteVideoProject,
@@ -86,32 +86,16 @@ export function LongFormVideoSection({ campaign, script }: Props) {
         aspectRatio,
         model,
       });
-      toast('Storyboard généré !', {
-        message: `${preset.scenes} scènes prêtes. Clique sur "Générer toutes les scènes" pour créer les clips.`,
+      toast('Projet créé !', {
+        message: `${preset.scenes} scènes vides prêtes. Décris chaque scène, puis génère les clips.`,
         variant: 'success',
       });
     } catch (err: any) {
-      toast('Erreur de planification', {
-        message: err?.message || 'Impossible de planifier les scènes.',
+      toast('Erreur', {
+        message: err?.message || 'Impossible de créer le projet.',
         variant: 'error',
       });
     }
-  }
-
-  if (!script?.storyboard && !script?.hook) {
-    return (
-      <YStack padding="$5" gap="$4">
-        <Card backgroundColor="$color2" borderColor="$color4" borderWidth={1} padding="$4">
-          <YStack gap="$3" alignItems="center">
-            <Wand2 size={36} color="$color9" />
-            <H4 color="$color12" textAlign="center">Génère d'abord le script</H4>
-            <Paragraph size="$3" color="$color10" textAlign="center">
-              La vidéo long format découpe ton script en {preset.scenes} scènes cinématiques, chacune générée séparément par l'IA puis jouée en séquence.
-            </Paragraph>
-          </YStack>
-        </Card>
-      </YStack>
-    );
   }
 
   return (
@@ -127,7 +111,8 @@ export function LongFormVideoSection({ campaign, script }: Props) {
           </XStack>
 
           <Paragraph size="$2" color="$color10">
-            L'agent IA découpe le script en scènes, puis génère chaque clip individuellement.
+            Choisis le nombre de scènes, le format et le modèle. Tu décris ensuite chaque scène
+            toi-même (image + voix) — pas de storyboard imposé.
           </Paragraph>
 
           <YStack gap="$3">
@@ -173,7 +158,7 @@ export function LongFormVideoSection({ campaign, script }: Props) {
             onPress={handleCreateProject}
             pressStyle={{ scale: 0.97 }}
           >
-            {createMut.isPending ? 'Planification…' : `Planifier ${preset.scenes} scènes`}
+            {createMut.isPending ? 'Création…' : `Créer ${preset.scenes} scènes vides`}
           </Button>
         </YStack>
       </Card>
@@ -188,6 +173,8 @@ export function LongFormVideoSection({ campaign, script }: Props) {
             <ProjectCard
               key={p.id}
               project={p}
+              campaign={campaign}
+              script={script}
               onDelete={async () => {
                 if (typeof window !== 'undefined' && !window.confirm(`Supprimer le montage « ${p.title} » ?`)) {
                   return;
@@ -208,10 +195,21 @@ export function LongFormVideoSection({ campaign, script }: Props) {
   );
 }
 
-function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: () => void }) {
+function ProjectCard({
+  project,
+  campaign,
+  script,
+  onDelete,
+}: {
+  project: VideoProject;
+  campaign: Campaign;
+  script: VideoScript | null;
+  onDelete: () => void;
+}) {
   const { data: scenes = [] } = useVideoScenes(project.id);
   const generateAllMut = useGenerateAllScenes();
   const generateOneMut = useGenerateScene();
+  const suggestMut = useSuggestScenes();
   const setShotMut = useSetSceneScreenshot();
   const [playingSceneIdx, setPlayingSceneIdx] = useState<number | null>(null);
   const [uploadingSceneId, setUploadingSceneId] = useState<string | null>(null);
@@ -344,6 +342,25 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
       toast('Vidéo prête !', { message: 'Toutes les scènes sont générées.', variant: 'success' });
     } catch (err: any) {
       toast('Partiellement échoué', { message: describeGenerationError(err), variant: 'error' });
+    }
+  }
+
+  async function handleSuggest() {
+    if (
+      typeof window !== 'undefined' &&
+      scenes.some((s: VideoScene) => (extractSceneScreenshot(s.prompt || '').prompt || '').trim()) &&
+      !window.confirm('Remplacer les descriptions actuelles par des suggestions IA ? (les captures liées sont conservées)')
+    ) {
+      return;
+    }
+    try {
+      await suggestMut.mutateAsync({ campaign, script, project, scenes });
+      toast('Suggestions ajoutées', {
+        message: 'Chaque scène a reçu une proposition. Édite-la librement avant de générer.',
+        variant: 'success',
+      });
+    } catch (err: any) {
+      toast('Suggestion impossible', { message: describeGenerationError(err), variant: 'error' });
     }
   }
 
@@ -642,12 +659,26 @@ function ProjectCard({ project, onDelete }: { project: VideoProject; onDelete: (
 
         {/* Liste des scènes */}
         <YStack gap="$2">
-          <SizableText size="$2" color="$color10" fontWeight="600" letterSpacing={0.5}>
-            STORYBOARD ({scenes.length} SCÈNES)
-          </SizableText>
+          <XStack justifyContent="space-between" alignItems="center" gap="$2">
+            <SizableText size="$2" color="$color10" fontWeight="600" letterSpacing={0.5}>
+              SCÈNES ({scenes.length})
+            </SizableText>
+            {scenes.length > 0 && (
+              <Button
+                size="$2"
+                chromeless
+                icon={suggestMut.isPending ? <Spinner size="small" /> : <Wand2 size={14} color="$color10" />}
+                disabled={suggestMut.isPending || anyGenerating}
+                onPress={handleSuggest}
+              >
+                {suggestMut.isPending ? 'Suggestion…' : 'Suggérer (IA)'}
+              </Button>
+            )}
+          </XStack>
           <SizableText size="$1" color="$color10">
-            📱 Ajoute une capture d'écran à chaque scène pour montrer les vraies pages de
-            ton appli : la scène démarrera depuis cette image (image-to-video).
+            ✍️ Décris chaque scène toi-même (une phrase suffit). Ajoute une capture d'écran pour
+            démarrer la scène depuis une vraie page de ton appli (image-to-video). Le bouton
+            « Suggérer » est optionnel.
           </SizableText>
           {scenes.map((scene: VideoScene) => (
             <SceneRow
@@ -685,8 +716,17 @@ function SceneRow({
   const { prompt: cleanPrompt, imageUrl: screenshotUrl } = extractSceneScreenshot(scene.prompt || '');
 
   const updatePromptMut = useUpdateScenePrompt();
-  const [editing, setEditing] = useState(false);
+  // Open the editor by default when the scene has no description yet, so the
+  // manual "write it yourself" workflow is front-and-center.
+  const [editing, setEditing] = useState(!cleanPrompt);
   const [promptDraft, setPromptDraft] = useState(cleanPrompt);
+
+  // If a suggestion fills this scene while its editor is open and still empty,
+  // load the suggested text (without clobbering anything the user has typed).
+  useEffect(() => {
+    if (editing && !promptDraft && cleanPrompt) setPromptDraft(cleanPrompt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cleanPrompt]);
 
   async function handleSavePrompt() {
     try {
@@ -746,14 +786,17 @@ function SceneRow({
         ) : null}
       </XStack>
 
-      {/* Édition manuelle du prompt de la scène */}
+      {/* Description manuelle de la scène (la « trame » de la vidéo) */}
       {editing ? (
         <YStack gap="$2">
+          <Label size="$2" color="$color12" fontWeight="600">
+            🎬 Ce que montre la scène
+          </Label>
           <TextArea
             value={promptDraft}
             onChangeText={setPromptDraft}
-            placeholder="Décris la scène (prompt cinématique, en anglais de préférence pour de meilleurs rendus)…"
-            minHeight={110}
+            placeholder="Décris librement l'image de cette scène (ex. « Gros plan d'un smartphone posé sur une table en bois, lumière douce du matin, la caméra s'approche lentement »). L'anglais donne souvent de meilleurs rendus, mais le français fonctionne aussi."
+            minHeight={120}
             size="$3"
             backgroundColor="$color1"
             color="$color12"
@@ -765,30 +808,34 @@ function SceneRow({
               disabled={updatePromptMut.isPending}
               onPress={handleSavePrompt}
             >
-              Enregistrer
+              Enregistrer la description
             </Button>
-            <Button
-              size="$2"
-              chromeless
-              disabled={updatePromptMut.isPending}
-              onPress={() => {
-                setPromptDraft(cleanPrompt);
-                setEditing(false);
-              }}
-            >
-              Annuler
-            </Button>
+            {cleanPrompt ? (
+              <Button
+                size="$2"
+                chromeless
+                disabled={updatePromptMut.isPending}
+                onPress={() => {
+                  setPromptDraft(cleanPrompt);
+                  setEditing(false);
+                }}
+              >
+                Annuler
+              </Button>
+            ) : null}
           </XStack>
         </YStack>
       ) : (
-        <XStack alignItems="center" justifyContent="space-between" gap="$2">
-          <SizableText size="$1" color="$color10" flex={1} numberOfLines={2}>
-            {cleanPrompt || 'Aucun prompt — clique sur Modifier pour en écrire un.'}
+        <YStack gap="$2">
+          <SizableText size="$2" color="$color11">
+            {cleanPrompt}
           </SizableText>
-          <Button size="$2" chromeless disabled={isBusy} onPress={() => setEditing(true)}>
-            ✏️ Modifier
-          </Button>
-        </XStack>
+          <XStack>
+            <Button size="$2" chromeless disabled={isBusy} onPress={() => setEditing(true)}>
+              ✏️ Modifier la description
+            </Button>
+          </XStack>
+        </YStack>
       )}
 
       {/* Capture d'écran attachée à la scène (image-to-video) */}
