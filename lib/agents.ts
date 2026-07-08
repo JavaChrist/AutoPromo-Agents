@@ -169,6 +169,12 @@ async function generateVideo(options: {
     duration: formatDuration(options.model, options.duration),
   };
   if (options.image_url) input.image_url = options.image_url;
+  // Veo generates its own soundtrack (invented speech in a fake language, music)
+  // by default. Disable it so each clip is clean/silent — the promo's only audio
+  // is the optional voice-over mixed at assembly time.
+  if (options.model.includes('veo')) {
+    input.generate_audio = false;
+  }
   // Only Kling documents a `negative_prompt` field; sending it to Veo Fast would
   // be rejected (422), so the static lock for Veo relies on the prompt suffix.
   if (options.negative_prompt && options.model.includes('kling')) {

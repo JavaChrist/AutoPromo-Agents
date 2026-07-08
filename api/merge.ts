@@ -265,30 +265,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       files.push(dest);
     }
 
-    // Normalize + concatenate with the concat FILTER (not the stream-copy
-    // demuxer): each clip is scaled/padded to a uniform WxH, fps and pixel
-    // format before being joined. This removes the stutter/frame-drops the
-    // demuxer produced when clips had different fps/timebases/codecs, and
-    // yields an accurate total duration (= sum of the real clip lengths).
-    // Clip audio is intentionally dropped (a=0) — the promo's only sound is the
-    // optional voice-over mixed in further below.
+    // Normalize each clip INDIVIDUALLY (sequential, low memory) to a uniform
+    // silent MP4 — same resolution, fps, SAR and pixel format. Doing it one clip
+    // at a time (instead of one big filter_complex opening N decoders at once)
+    // keeps memory low so the function isn't OOM-killed on long videos, and
+    // guarantees the clips share the exact codec params required for a clean
+    // stream-copy concat (no stutter, accurate total duration). Clip audio is
+    // dropped (-an): the promo's only sound is the optional voice-over below.
     const { W: VW, H: VH } = overlayDims(aspectRatio);
-    const inputArgs = files.flatMap((f) => ['-i', f]);
-    const vParts = files.map(
-      (_, i) =>
-        `[${i}:v]scale=${VW}:${VH}:force_original_aspect_ratio=decrease,` +
-        `pad=${VW}:${VH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30,format=yuv420p[v${i}]`
-    );
-    const concatInputs = files.map((_, i) => `[v${i}]`).join('');
-    const filterComplex = `${vParts.join(';')};${concatInputs}concat=n=${files.length}:v=1:a=0[vout]`;
+    const vf =
+      `scale=${VW}:${VH}:force_original_aspect_ratio=decrease,` +
+      `pad=${VW}:${VH}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30,format=yuv420p`;
+
+    const normFiles: string[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const norm = path.join(work, `norm_${String(i).padStart(3, '0')}.mp4`);
+      try {
+        await runFfmpeg(ffmpegPath, [
+          '-y', '-i', files[i],
+          '-an', '-vf', vf,
+          '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+          '-video_track_timescale', '30000',
+          '-movflags', '+faststart', norm,
+        ]);
+      } catch (e: any) {
+        throw new Error(`Normalisation de la scène ${i + 1} échouée : ${String(e?.message || e).slice(-300)}`);
+      }
+      normFiles.push(norm);
+    }
+
+    const listFile = path.join(work, 'list.txt');
+    await fs.writeFile(listFile, normFiles.map((f) => `file '${f}'`).join('\n'), 'utf8');
 
     const out = path.join(work, 'final.mp4');
     await runFfmpeg(ffmpegPath, [
-      '-y', ...inputArgs,
-      '-filter_complex', filterComplex,
-      '-map', '[vout]',
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
-      '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out,
+      '-y', '-f', 'concat', '-safe', '0', '-i', listFile,
+      '-c', 'copy', '-movflags', '+faststart', out,
     ]);
 
     // Optional text overlays (brand/title + CTA + URL) burned onto the video.

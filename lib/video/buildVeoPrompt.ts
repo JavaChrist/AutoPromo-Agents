@@ -32,14 +32,15 @@ export interface VeoPromptResult {
 
 /** Locked, non-negotiable suffix appended to every `screen` scene prompt. */
 export const SCREEN_LOCK_SUFFIX =
-  'The on-screen content stays completely static and unchanged throughout — no navigation, no tapping, no UI animation, no home screen, no logo redraw, no text change. All motion comes ONLY from a slow, subtle camera movement and the surrounding environment. No brand logos visible. Vertical 9:16.';
+  'The on-screen content stays completely static and unchanged throughout — no navigation, no tapping, no UI animation, no home screen, no logo redraw, no text change. All motion comes ONLY from a slow, subtle camera movement and the surrounding environment. Absolutely NO text, words, letters, captions, subtitles, numbers, typography or logos rendered anywhere in the frame. No spoken dialogue, no voice, no music — silent footage only.';
 
 /** Light suffix for ambiance scenes (no screen to protect). */
-export const AMBIANCE_SUFFIX = 'No brand logos visible. Vertical 9:16.';
+export const AMBIANCE_SUFFIX =
+  'Absolutely NO text, words, letters, captions, subtitles, numbers, typography or logos anywhere in the frame. No spoken dialogue, no voice, no music — silent footage only.';
 
 /** Negative prompt for `screen` scenes (used when the model supports one). */
 export const SCREEN_NEGATIVE_PROMPT =
-  'navigation, tapping, scrolling, swiping, cursor, clicking, UI animation, screen transition, home screen, logo redraw, text change, moving interface elements, different UI, regenerated screen, brand logos, captions, subtitles';
+  'text, words, letters, captions, subtitles, numbers, typography, watermark, logo, brand logos, navigation, tapping, scrolling, swiping, cursor, clicking, UI animation, screen transition, home screen, logo redraw, text change, moving interface elements, different UI, regenerated screen, speech, dialogue, music';
 
 /**
  * Single words (whole-word, case-insensitive) that induce on-screen motion and
