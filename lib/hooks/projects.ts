@@ -5,6 +5,12 @@ import { normalizeProject, normalizeScene } from '../normalizers';
 import type { Campaign, VideoScript, VideoProject, VideoScene } from '../types';
 import { planVideoScenes, generateSceneClip, setSceneScreenshot, extractSceneScreenshot } from '../agents';
 import { deleteBlob } from '../deleteBlob';
+import {
+  PROMO_PROJECT_MODEL,
+  emptyStoryboard,
+  serializeStoryboard,
+  type PromoStoryboard,
+} from '../promo';
 
 // ─── Long-form video projects ────────────────────────────────────────────────
 
@@ -316,6 +322,53 @@ export function useUpdateProjectVoiceover() {
   return useMutation({
     mutationFn: async (input: { projectId: string; campaignId: string; voiceover: string }) => {
       await db.videoProjects.update(input.projectId, { voiceoverFull: input.voiceover });
+    },
+    onSettled: (_, __, variables) => {
+      qc.invalidateQueries({ queryKey: ['video_projects', variables.campaignId] });
+    },
+  });
+}
+
+// ─── "Promo écrans" projects (screenshot slideshow + ambiance + voice) ────────
+
+/** Create a hybrid promo project. The storyboard lives as JSON in voiceoverFull. */
+export function useCreateSlideshowProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      campaign: Campaign;
+      aspectRatio: string;
+      targetDuration: number;
+      voice: string;
+    }) => {
+      const { campaign, aspectRatio, targetDuration, voice } = input;
+      const storyboard = emptyStoryboard(voice);
+      const projectRow = await db.videoProjects.create({
+        campaignId: campaign.id,
+        userId: campaign.user_id,
+        title: `${campaign.product_name} — Promo écrans`,
+        targetDuration,
+        aspectRatio,
+        model: PROMO_PROJECT_MODEL,
+        voiceoverFull: serializeStoryboard(storyboard),
+        status: 'draft',
+      });
+      return projectRow.id as string;
+    },
+    onSuccess: (_, variables) => {
+      qc.invalidateQueries({ queryKey: ['video_projects', variables.campaign.id] });
+    },
+  });
+}
+
+/** Persist the edited promo storyboard (segments, voice, music) as JSON. */
+export function useUpdateSlideshowStoryboard() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { projectId: string; campaignId: string; storyboard: PromoStoryboard }) => {
+      await db.videoProjects.update(input.projectId, {
+        voiceoverFull: serializeStoryboard(input.storyboard),
+      });
     },
     onSettled: (_, __, variables) => {
       qc.invalidateQueries({ queryKey: ['video_projects', variables.campaignId] });

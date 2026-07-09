@@ -44,12 +44,13 @@ import { describeGenerationError } from '@/lib/errors';
 import { useGenerationStore, type AgentStepKey, type AgentStepState } from '@/lib/stores/generation';
 import { AIClipsSection } from '@/components/AIClipsSection';
 import { LongFormVideoSection } from '@/components/LongFormVideoSection';
+import { PromoScreensSection } from '@/components/PromoScreensSection';
 import { CampaignPlanSection } from '@/components/CampaignPlanSection';
 
 export default function CampaignDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const [section, setSection] = useState<'video' | 'clips' | 'longform' | 'posts' | 'plan'>('video');
+  const [section, setSection] = useState<'video' | 'clips' | 'longform' | 'promo' | 'posts' | 'plan'>('video');
 
   const { data: campaign, isLoading } = useCampaign(id || '');
   const { data: script } = useVideoScript(id || '');
@@ -216,6 +217,7 @@ export default function CampaignDetail() {
                       { label: '🎬 Script', value: 'video' },
                       { label: '🎥 Clip', value: 'clips' },
                       { label: '🎦 Long format', value: 'longform' },
+                      { label: '📱 Promo écrans', value: 'promo' },
                       { label: '💬 Posts', value: 'posts' },
                       { label: '🗓️ Planning', value: 'plan' },
                     ]}
@@ -233,6 +235,8 @@ export default function CampaignDetail() {
                 <AIClipsSection campaign={campaign} script={script || null} />
               ) : section === 'longform' ? (
                 <LongFormVideoSection campaign={campaign} script={script || null} />
+              ) : section === 'promo' ? (
+                <PromoScreensSection campaign={campaign} />
               ) : section === 'posts' ? (
                 <PostsSection posts={posts || []} />
               ) : (

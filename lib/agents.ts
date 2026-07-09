@@ -470,6 +470,78 @@ export async function generateSceneClip(
   }
 }
 
+// ─── Promo écrans : scénario narratif (ambiance + démo écrans) ────────────────
+
+export interface PromoStoryboardSegment {
+  type: 'ambiance' | 'app_demo';
+  /** Ligne de voix off en français lue pendant ce segment. */
+  voice: string;
+  /** Prompt visuel anglais (uniquement pour les segments `ambiance`). */
+  prompt?: string;
+}
+
+const PROMO_SCENARIOS = [
+  'Une mini-scène de vie où un personnage rencontre le problème que résout l\'app, puis sort son téléphone pour montrer la solution.',
+  'Un dialogue du quotidien (sans texte) qui amène naturellement la présentation de l\'app sur le téléphone.',
+  'Un avant/après : la galère au début, puis la tranquillité une fois l\'app adoptée.',
+];
+
+/**
+ * Proposes a hybrid promo storyboard: alternating `ambiance` lifestyle shots and
+ * `app_demo` segments (where the user later attaches real screenshots). Voice-over
+ * lines are in French; ambiance visual prompts are in English, text-free & silent.
+ */
+export async function planPromoStoryboard(
+  campaign: Campaign,
+  options: { numSegments: number }
+): Promise<PromoStoryboardSegment[]> {
+  const toneInstruction = TONE_INSTRUCTIONS[campaign.tone || 'professionnel'] || '';
+  const scenario = PROMO_SCENARIOS[Math.floor(Math.random() * PROMO_SCENARIOS.length)];
+
+  const object = await generateObject<{ segments: PromoStoryboardSegment[] }>(
+    `Tu es réalisateur de vidéos promo pour applications. Conçois un scénario en EXACTEMENT ${options.numSegments} segments pour une vidéo verticale d'environ 60 secondes.
+
+Idée de scénario (à personnaliser) : ${scenario}
+
+Produit : ${campaign.product_name}
+Pitch : ${campaign.pitch}
+Cible : ${campaign.target_audience || 'grand public'}
+${toneInstruction}
+
+Il existe DEUX types de segments :
+- "ambiance" : une courte scène de vie filmée (personnages, décor réel, situation), SANS aucun écran d'application visible. C'est ce type qui installe l'histoire.
+- "app_demo" : un moment où l'on montre les VRAIS écrans de l'application (l'utilisateur fournira ses captures). Ici on ne décrit PAS d'image, seulement la voix off qui présente les fonctionnalités montrées.
+
+Alterne les types de façon cohérente : commence par une "ambiance" qui pose le problème/contexte, enchaîne avec un "app_demo" qui montre la solution à l'écran, et termine idéalement sur un "app_demo" (dernier écran = logo).
+
+Pour CHAQUE segment, produis :
+- type : "ambiance" ou "app_demo"
+- voice : la ligne de voix off en FRANÇAIS (1 à 2 phrases naturelles, orales, percutantes). L'ensemble des lignes doit raconter une histoire fluide qui présente l'app et ses fonctions.
+- prompt : UNIQUEMENT pour les segments "ambiance" — une description cinématique en ANGLAIS (40-70 mots) : sujets, action, décor, lumière, mouvement de caméra, couleurs. AUCUN texte/écran/logo/sous-titre à l'image (les modèles IA écrivent mal). Pour les segments "app_demo", laisse prompt vide.`,
+    {
+      type: 'object',
+      properties: {
+        segments: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              type: { type: 'string', enum: ['ambiance', 'app_demo'] },
+              voice: { type: 'string' },
+              prompt: { type: 'string' },
+            },
+            required: ['type', 'voice'],
+          },
+        },
+      },
+      required: ['segments'],
+    },
+    { temperature: 1.1 }
+  );
+
+  return object.segments.slice(0, options.numSegments);
+}
+
 // ─── Voix off (text-to-speech) ───────────────────────────────────────────────
 
 export type VoiceoverVoice = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';

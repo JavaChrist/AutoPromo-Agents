@@ -63,3 +63,56 @@ export async function pickAndUploadScreenshot(_pathPrefix: string): Promise<stri
   if (!response.ok) throw new Error(json?.error || "Échec de l'upload de la capture.");
   return json.url as string;
 }
+
+/** Uploads an already-read file (base64) to Blob and returns its public URL. */
+async function uploadBase64(data: string, ext: string): Promise<string> {
+  const response = await fetch(`${apiBase()}/api/upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data, ext }),
+  });
+  const text = await response.text();
+  let json: any;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error("L'API d'upload n'est pas disponible. Redéploie le site sur Vercel.");
+  }
+  if (!response.ok) throw new Error(json?.error || "Échec de l'upload.");
+  return json.url as string;
+}
+
+/**
+ * Web-only: opens a native file picker for an audio file (MP3) and uploads it.
+ * Returns the public URL, or null if cancelled. Kept small (Vercel body limit).
+ */
+export function pickAndUploadAudio(): Promise<string | null> {
+  if (typeof document === 'undefined') {
+    return Promise.reject(new Error("L'import audio n'est disponible que sur le web pour l'instant."));
+  }
+  return new Promise((resolve, reject) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'audio/mpeg,audio/mp4,.mp3,.m4a';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return resolve(null);
+      if (file.size > 4 * 1024 * 1024) {
+        return reject(new Error('Musique trop lourde (max ~4 Mo). Utilise un extrait plus court/compressé.'));
+      }
+      try {
+        const ext = (file.name.split('.').pop() || 'mp3').toLowerCase().replace('mpeg', 'mp3');
+        const buf = await file.arrayBuffer();
+        let binary = '';
+        const bytes = new Uint8Array(buf);
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        const base64 = typeof btoa !== 'undefined' ? btoa(binary) : Buffer.from(bytes).toString('base64');
+        const url = await uploadBase64(base64, ext === 'm4a' ? 'm4a' : 'mp3');
+        resolve(url);
+      } catch (e) {
+        reject(e);
+      }
+    };
+    input.click();
+  });
+}

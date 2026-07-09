@@ -8,6 +8,10 @@
       "maxDuration": 300,
       "includeFiles": "node_modules/{ffmpeg-static/**,@expo-google-fonts/inter/700Bold/**,@resvg/resvg-js-linux-x64-gnu/**}"
     },
+    "api/slideshow.ts": {
+      "maxDuration": 300,
+      "includeFiles": "node_modules/ffmpeg-static/**"
+    },
     "api/ai/video.ts": {
       "maxDuration": 300
     },

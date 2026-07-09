@@ -65,7 +65,9 @@ interface Props {
 }
 
 export function LongFormVideoSection({ campaign, script }: Props) {
-  const { data: projects = [] } = useVideoProjects(campaign.id);
+  const { data: allProjects = [] } = useVideoProjects(campaign.id);
+  // Exclude "Promo écrans" (slideshow) projects — they have their own tab.
+  const projects = (allProjects as VideoProject[]).filter((p) => p.model !== 'slideshow');
   const createMut = useCreateVideoProject();
   const deleteMut = useDeleteVideoProject();
 

@@ -19,7 +19,14 @@ const ALLOWED_EXT: Record<string, string> = {
   jpeg: 'image/jpeg',
   gif: 'image/gif',
   webp: 'image/webp',
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
 };
+
+/** Blob subfolder by file kind. */
+function folderFor(ext: string): string {
+  return ext === 'mp3' || ext === 'm4a' ? 'music' : 'screenshots';
+}
 
 function setCors(res: VercelResponse): void {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -53,7 +60,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const ext: string = String(body.ext || 'png').toLowerCase();
 
     if (!data) {
-      res.status(400).json({ error: 'Image manquante.' });
+      res.status(400).json({ error: 'Fichier manquant.' });
       return;
     }
     if (!ALLOWED_EXT[ext]) {
@@ -63,11 +70,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     const buffer = Buffer.from(data, 'base64');
     if (buffer.length > 4 * 1024 * 1024) {
-      res.status(413).json({ error: 'Image trop lourde (max 4 Mo).' });
+      res.status(413).json({ error: 'Fichier trop lourd (max 4 Mo).' });
       return;
     }
 
-    const name = `screenshots/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const name = `${folderFor(ext)}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
     const blob = await put(name, buffer, {
       access: 'public',
       contentType: ALLOWED_EXT[ext],
